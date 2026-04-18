@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "SharedLeaderboard": {
+      "title": "Shared Leaderboard",
+      "description": "A snapshot of a leaderboard period shared with others.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "startDate": { "type": "number" },
+        "endDate": { "type": "number" },
+        "standings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "playerId": { "type": "string" },
+              "playerName": { "type": "string" },
+              "points": { "type": "number" }
+            }
+          }
+        },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "name", "standings", "createdAt"]
+    },
+    "UserData": {
+      "title": "User Data",
+      "description": "The full state of the user's training league.",
+      "type": "object",
+      "properties": {
+        "squad": { "type": "array" },
+        "exercises": { "type": "array" },
+        "periods": { "type": "array" },
+        "currentPeriodId": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/shared_leaderboards/{id}": {
+      "schema": "SharedLeaderboard",
+      "description": "Publicly viewable leaderboard snapshots."
+    },
+    "/users/{userId}/config/state": {
+      "schema": "UserData",
+      "description": "The synchronized state for a coach."
+    }
+  }
+}

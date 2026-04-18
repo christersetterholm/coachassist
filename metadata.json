@@ -1,0 +1,5 @@
+{
+  "name": "CoachAssist",
+  "description": "Ett komplett verktyg för fotbollscoachen. Hantera spelartrupp med bilder, bygg laguppställningar och håll koll på poängjakt och statistik.",
+  "requestFramePermissions": []
+}
