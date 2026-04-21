@@ -31,8 +31,12 @@
       "properties": {
         "squad": { "type": "array" },
         "exercises": { "type": "array" },
+        "lineups": { "type": "array" },
+        "activeLineupId": { "type": "string" },
         "periods": { "type": "array" },
         "currentPeriodId": { "type": "string" },
+        "customFormations": { "type": "array" },
+        "pinnedFormationIds": { "type": "array" },
         "updatedAt": { "type": "number" }
       }
     }

@@ -374,32 +374,30 @@ export default function Leaderboard({
                   <span>Ta bort</span>
                 </button>
               )}
+
+              <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
+
+              <button
+                onClick={handleShare}
+                disabled={isSharing}
+                className="flex items-center gap-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm text-sm disabled:opacity-50"
+              >
+                {isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
+                <span>{isSharing ? 'Skapar...' : 'Dela'}</span>
+              </button>
+
+              {finalStats.some((p: any) => p.history.length > 0) && (
+                <button
+                  onClick={toggleAll}
+                  className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm"
+                >
+                  {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
+                  <span className="hidden xs:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
+                </button>
+              )}
             </div>
           )}
         </div>
-
-        {!sharedId && (
-          <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-            <button
-              onClick={handleShare}
-              disabled={isSharing}
-              className="flex items-center gap-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm text-sm disabled:opacity-50"
-            >
-              {isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
-              <span className="hidden xs:inline">{isSharing ? 'Skapar...' : 'Dela'}</span>
-            </button>
-            {finalStats.some((p: any) => p.history.length > 0) && (
-              <button
-                onClick={toggleAll}
-                className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm"
-              >
-                {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
-                <span className="hidden xs:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
-              </button>
-            )}
-          </div>
-        )}
-
       </div>
 
       <div className="space-y-4">

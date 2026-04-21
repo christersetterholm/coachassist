@@ -1,9 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { UserPlus, Trash2, Edit2, X, Check, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, storage } from '../lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { SquadPlayer } from '../types';
+import { auth } from '../lib/firebase';
+import { Player, SquadPlayer } from '../types';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
@@ -113,20 +112,54 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
     setIsUploading(true);
 
     try {
-      const user = auth.currentUser;
-      const fileName = `${Date.now()}-${Math.round(Math.random() * 1e6)}.jpg`;
-      const storagePath = user 
-        ? `users/${user.uid}/players/${fileName}`
-        : `anonymous/players/${fileName}`;
-      
-      const storageRef = ref(storage, storagePath);
-      const snapshot = await uploadBytes(storageRef, croppedBlob);
-      const url = await getDownloadURL(snapshot.ref);
-      
-      setNewPhotoUrl(url);
+      // Helper to compress and resize the image to a small Base64 string
+      const compressImage = (blob: Blob): Promise<string> => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.src = URL.createObjectURL(blob);
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            // We only need a small avatar-sized image (128x128)
+            const MAX_SIZE = 128;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_SIZE) {
+                height *= MAX_SIZE / width;
+                width = MAX_SIZE;
+              }
+            } else {
+              if (height > MAX_SIZE) {
+                width *= MAX_SIZE / height;
+                height = MAX_SIZE;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            // Set background to white for JPEGs (otherwise transparent pngs become black)
+            if (ctx) {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, width, height);
+              ctx.drawImage(img, 0, 0, width, height);
+            }
+            
+            // Use lower quality for ultra-small size, 0.4 is perfect for tiny avatars
+            const base64 = canvas.toDataURL('image/jpeg', 0.4);
+            resolve(base64);
+            URL.revokeObjectURL(img.src);
+          };
+        });
+      };
+
+      const base64Url = await compressImage(croppedBlob);
+      setNewPhotoUrl(base64Url);
     } catch (err) {
-      console.error('Photo upload error:', err);
-      alert('Kunde inte ladda upp bilden till molnet. Kontrollera din anslutning.');
+      console.error('Photo processing error:', err);
+      alert('Kunde inte bearbeta bilden. Försök med en mindre fil eller en annan bild.');
     } finally {
       setIsUploading(false);
     }
@@ -412,27 +445,27 @@ Kalle Karlsson	Mittback	4	https://image.url"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm flex items-center justify-between group"
+              className="bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm flex items-center justify-between group hover:shadow-md transition-all"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl overflow-hidden bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black border border-zinc-200 dark:border-zinc-800">
-                  {player.photoUrl ? (
-                    <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" />
-                  ) : (
-                    player.name.charAt(0).toUpperCase()
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="w-12 h-12 rounded-2xl overflow-hidden bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black border border-zinc-100 dark:border-zinc-800 shadow-inner">
+                    {player.photoUrl ? (
+                      <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-lg">{player.name.charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+                  {player.number && (
+                    <div className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white dark:border-zinc-900 shadow-sm">
+                      {player.number}
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-zinc-900 dark:text-white">{player.name}</span>
-                    {player.number && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-[10px] font-black rounded-md text-zinc-500">
-                         #{player.number}
-                      </span>
-                    )}
-                  </div>
+                  <h4 className="font-bold text-zinc-900 dark:text-white mb-0.5">{player.name}</h4>
                   {player.position && (
-                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                    <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
                       {player.position}
                     </span>
                   )}

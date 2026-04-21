@@ -24,10 +24,18 @@ export interface Lineup {
   nameTagStyle?: 'light' | 'dark';
   nameDisplayMode?: 'first' | 'last' | 'full';
   showNameBackground?: boolean;
-  nameBackgroundType?: 'classic' | 'badge' | 'minimal';
+  nameBackgroundType?: 'classic' | 'badge' | 'minimal' | 'solid' | 'none' | 'transparent';
   formation?: string;
   showPhoto?: boolean;
   showNumber?: boolean;
+  teamLogoUrl?: string;
+  pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass';
+  tacticalBoard?: {
+    drawings: any[];
+    footballPos: { x: number, y: number } | null;
+    opponents: { id: string, x: number, y: number }[];
+    showOpponents: boolean;
+  };
 }
 
 export interface Team {
@@ -89,6 +97,25 @@ export interface Player {
 
 export interface Game extends Exercise {
   players: Player[]; // This will be deprecated
+}
+
+export interface FormationPosition {
+  x: number;
+  y: number;
+}
+
+export interface FormationVariant {
+  id: string;
+  name: string;
+  description: string;
+  positions: FormationPosition[]; // 10 outfield players (0-9)
+}
+
+export interface FormationTemplate {
+  id: string;
+  name: string;
+  category: string;
+  variants: FormationVariant[];
 }
 
 export const GAME_ICONS = [
