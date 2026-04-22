@@ -8,11 +8,11 @@ interface ColorPickerProps {
 }
 
 const VEST_COLORS = [
+  '#1E3A8A', // Navy (Tröjfärg)
   '#84CC16', // Lime
   '#0EA5E9', // Sky
-  '#1E3A8A', // Navy
-  '#71717A', // Zinc
   '#F97316', // Orange
+  '#71717A', // Zinc
 ];
 
 export default function ColorPicker({ selectedColor, onChange }: ColorPickerProps) {

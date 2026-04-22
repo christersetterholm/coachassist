@@ -298,35 +298,41 @@ export default function Leaderboard({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             {!sharedId ? (
-                <div className="flex items-center gap-2">
-                  <select 
-                    value={selectedPeriodId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedPeriodId(id);
-                    }}
-                    className="bg-transparent border-none text-zinc-500 dark:text-zinc-400 font-bold text-sm focus:ring-0 outline-none cursor-pointer hover:text-indigo-600 transition-colors"
-                  >
-                    <option value="current" disabled>Välj tävling...</option>
-                    {periods.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} {p.isActive ? '(Aktiv)' : p.endDate ? '(Avslutad)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1 min-w-0">
+                    <select 
+                      value={selectedPeriodId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedPeriodId(id);
+                      }}
+                      className="w-full bg-transparent border-none text-zinc-900 dark:text-white font-black text-xl sm:text-2xl focus:ring-0 outline-none cursor-pointer hover:text-indigo-600 transition-colors p-0 appearance-none pr-8"
+                    >
+                      <option value="current" disabled>Välj tävling...</option>
+                      {periods.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.isActive ? '(Aktiv)' : p.endDate ? '(Avslutad)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
+                      <ChevronDown size={20} />
+                    </div>
+                  </div>
                   {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
                     <button 
+                      type="button"
                       onClick={() => {
-                        const p = periods.find(p => p.id === selectedPeriodId);
+                        const p = periods.find(period => period.id === selectedPeriodId);
                         if (p) {
                           setRenameValue(p.name);
                           setShowRenameModal(true);
                         }
                       }}
-                      className="p-1 text-zinc-400 hover:text-indigo-600 transition-colors"
-                      title="Byt namn"
+                      className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-all active:scale-90 active:bg-zinc-200 dark:active:bg-zinc-700 shadow-sm relative z-20"
+                      title="Redigera namn"
                     >
-                      <Edit2 size={14} />
+                      <Edit2 size={16} />
                     </button>
                   )}
                 </div>

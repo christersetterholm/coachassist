@@ -24,6 +24,22 @@
       },
       "required": ["id", "name", "standings", "createdAt"]
     },
+    "TrainingSession": {
+      "title": "Training Session",
+      "description": "Represents a planned training session with multiple moments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "number" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "moments": { "type": "array" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "title", "date", "startTime", "moments"]
+    },
     "UserData": {
       "title": "User Data",
       "description": "The full state of the user's training league.",
@@ -31,6 +47,7 @@
       "properties": {
         "squad": { "type": "array" },
         "exercises": { "type": "array" },
+        "sessions": { "type": "array" },
         "lineups": { "type": "array" },
         "activeLineupId": { "type": "string" },
         "periods": { "type": "array" },

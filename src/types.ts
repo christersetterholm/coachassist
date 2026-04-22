@@ -68,6 +68,26 @@ export interface PointsConfig {
   third: number;
 }
 
+export interface SessionMoment {
+  id: string;
+  name: string;
+  duration: number; // in minutes
+  description?: string;
+  exerciseId?: string; // Link to a standalone exercise if applicable
+}
+
+export interface TrainingSession {
+  id: string;
+  title: string;
+  date: number; // Timestamp
+  startTime: string; // "HH:MM"
+  endTime?: string; // Optional
+  moments: SessionMoment[];
+  attendance?: string[]; // Player IDs or names
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Exercise {
   id: string;
   name: string;
@@ -84,6 +104,7 @@ export interface Exercise {
   jokerPlayerIds?: string[];
   pointsConfig?: PointsConfig;
   periodId?: string;
+  sessionId?: string; // Optional link to a training session
 }
 
 // Keep these for backward compatibility during transition if needed, 

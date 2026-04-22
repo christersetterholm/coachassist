@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Minus, Trash2, Play, UserPlus, Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2 } from 'lucide-react';
+import { Plus, Minus, Trash2, Play, UserPlus, Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, PRESET_COLORS, GAME_ICONS, Exercise, Team, PointsConfig } from '../types';
 import ColorPicker from './ColorPicker';
@@ -19,24 +19,26 @@ interface GameSetupProps {
     defaultTimerSeconds: number, 
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
-    periodId?: string | null
+    periodId?: string | null,
+    sessionId?: string | null
   ) => void;
   initialGame?: Exercise;
   onCancel?: () => void;
   squad: SquadPlayer[];
+  sessionAttendance?: string[];
   currentPeriodId: string | null;
   key?: React.Key;
 }
 
 const VEST_COLORS = [
+  '#1E3A8A', // Navy (Tröjfärg)
   '#84CC16', // Lime
   '#0EA5E9', // Sky
-  '#1E3A8A', // Navy
-  '#71717A', // Zinc
   '#F97316', // Orange
+  '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad, currentPeriodId }: GameSetupProps) {
+export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, currentPeriodId }: GameSetupProps) {
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon, setSelectedIcon] = useState(initialGame?.icon || 'Dribbble');
   const [showAllIcons, setShowAllIcons] = useState(false);
@@ -49,6 +51,10 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
   const [showJokers, setShowJokers] = useState(false);
   const [showAttendanceInput, setShowAttendanceInput] = useState(false);
   const [attendanceText, setAttendanceText] = useState('');
+  const [standaloneAttendance, setStandaloneAttendance] = useState<string[]>(
+    initialGame && !sessionAttendance ? initialGame.teams.flatMap(t => t.playerIds) : []
+  );
+  const [showStandaloneAttendance, setShowStandaloneAttendance] = useState(false);
   
   const [teams, setTeams] = useState<Omit<Team, 'score'>[]>(
     initialGame?.teams.map(({ score, ...t }) => t) || [
@@ -192,6 +198,45 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
       return;
     }
 
+    if (!sessionAttendance) {
+      setStandaloneAttendance(attendingPlayers.map(p => p.id));
+    }
+
+    _distributePlayers(attendingPlayers);
+    setShowAttendanceInput(false);
+    setAttendanceText('');
+  };
+
+  const generateTeamsFromSessionAttendance = () => {
+    const list = sessionAttendance || standaloneAttendance;
+    if (!list || list.length === 0) return;
+
+    const attendingPlayers: SquadPlayer[] = [];
+
+    list.forEach(idOrName => {
+      const player = squad.find(p => p.id === idOrName || p.name.toLowerCase() === idOrName.toLowerCase());
+      if (player) {
+        attendingPlayers.push(player);
+      }
+    });
+
+    if (attendingPlayers.length === 0) {
+      alert("Hittade inga spelare från närvarolistan i truppen.");
+      return;
+    }
+
+    _distributePlayers(attendingPlayers);
+  };
+
+  const toggleStandaloneAttendance = (playerId: string) => {
+    setStandaloneAttendance(prev => 
+      prev.includes(playerId) 
+        ? prev.filter(id => id !== playerId)
+        : [...prev, playerId]
+    );
+  };
+
+  const _distributePlayers = (attendingPlayers: SquadPlayer[]) => {
     // 3. Group players by position to distribute them evenly
     const playersByPosition: Record<string, string[]> = {};
     attendingPlayers.forEach(p => {
@@ -204,8 +249,6 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
     const teamCount = teams.length;
     const newTeams = teams.map(t => ({ ...t, playerIds: [] as string[] }));
     
-    // We use a global counter to ensure teams get an equal number of players 
-    // while also spreading out positions
     let globalPlayerIndex = 0;
 
     // Process each position group
@@ -222,10 +265,12 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
     });
 
     setTeams(newTeams);
-    setShowAttendanceInput(false);
-    setAttendanceText('');
-    
     // Clear jokers as they might not be attending or should be in teams now
+    setJokerPlayerIds([]);
+  };
+
+  const clearAllTeams = () => {
+    setTeams(teams.map(t => ({ ...t, playerIds: [] })));
     setJokerPlayerIds([]);
   };
 
@@ -241,7 +286,8 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
       defaultSeconds, 
       jokerPlayerIds, 
       pointsConfig,
-      initialGame ? initialGame.periodId : currentPeriodId
+      initialGame ? initialGame.periodId : currentPeriodId,
+      initialGame ? initialGame.sessionId : (sessionAttendance ? 'active' : null) // Using 'active' as a placeholder if we're in session mode
     );
   };
 
@@ -355,7 +401,20 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
                   className="space-y-4 overflow-hidden"
                 >
                   <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex flex-col mb-4">
+                    {/* Linked Session Badge */}
+            {(sessionAttendance || initialGame?.sessionId) && (
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-4 mb-8 flex items-center gap-4">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0">
+                  <Calendar size={20} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">Kopplad till träningspass</h4>
+                  <p className="text-xs text-indigo-600/70 dark:text-indigo-400/70">Använder närvaro från pågående pass för lagindelning.</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col mb-4">
                       <span className="font-bold text-zinc-900 dark:text-white text-sm">Standardtid</span>
                       <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Tid per omgång</span>
                     </div>
@@ -509,6 +568,87 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
             </div>
 
             <div className="space-y-4">
+              {((sessionAttendance && sessionAttendance.length > 0) || (standaloneAttendance.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={generateTeamsFromSessionAttendance}
+                  className="w-full flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/20 group"
+                >
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-200 dark:shadow-none group-hover:scale-110 transition-transform">
+                      <Users size={20} />
+                    </div>
+                    <div>
+                      <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
+                        {sessionAttendance ? 'Använd närvaro från passet' : 'Fördela närvarande spelare'}
+                      </span>
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
+                        {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
+                      </span>
+                    </div>
+                  </div>
+                  <Wand2 size={20} className="text-indigo-600 dark:text-indigo-400" />
+                </button>
+              )}
+
+              {!sessionAttendance && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowStandaloneAttendance(!showStandaloneAttendance)}
+                    className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-zinc-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-500">
+                        <Users size={20} />
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Välj närvarande spelare</span>
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">MARKERA VILKA SOM ÄR PÅ PLATS</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded-full text-[10px] font-black">
+                        {standaloneAttendance.length}
+                      </span>
+                      <div className="text-zinc-400">
+                        {showStandaloneAttendance ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                      </div>
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showStandaloneAttendance && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                          <div className="flex flex-wrap gap-2">
+                            {squad.map(player => (
+                              <button
+                                key={player.id}
+                                type="button"
+                                onClick={() => toggleStandaloneAttendance(player.id)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                  standaloneAttendance.includes(player.id)
+                                    ? 'bg-zinc-900 dark:bg-zinc-100 border-zinc-900 dark:border-zinc-100 text-white dark:text-zinc-900 shadow-sm'
+                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-gray-500 hover:border-indigo-300'
+                                }`}
+                              >
+                                {player.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => setShowAttendanceInput(!showAttendanceInput)}
@@ -560,6 +700,17 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {teams.some(t => t.playerIds.length > 0) && (
+                <button
+                  type="button"
+                  onClick={clearAllTeams}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 rounded-xl font-bold hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-500 transition-all text-xs uppercase tracking-widest border border-zinc-200 dark:border-zinc-700 hover:border-red-200"
+                >
+                  <RotateCcw size={14} />
+                  <span>Rensa alla spelare från lagen</span>
+                </button>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -604,6 +755,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
                                       ? 'bg-zinc-100 border-zinc-100 text-zinc-400 opacity-50 cursor-not-allowed'
                                       : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
                                 }`}
+                                style={isJoker ? { backgroundColor: '#6366f1', borderColor: '#6366f1' } : {}}
                                 disabled={isInAnyTeam}
                               >
                                 {player.name}
@@ -632,11 +784,20 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
                     className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800"
                   >
                     <div className="flex items-center justify-between mb-4">
-                      <div className="bg-white dark:bg-zinc-900 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm shrink-0 overflow-visible">
-                        <ColorPicker 
-                          selectedColor={team.color} 
-                          onChange={(color) => updateTeam(team.id, { color })} 
-                        />
+                      <div className="flex items-center gap-3">
+                        <div className="bg-white dark:bg-zinc-900 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm shrink-0 overflow-visible">
+                          <ColorPicker 
+                            selectedColor={team.color} 
+                            onChange={(color) => updateTeam(team.id, { color })} 
+                          />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest leading-none mb-1">Lag {index + 1}</span>
+                          <div className="flex items-center gap-1.5">
+                            <Users size={12} className="text-zinc-400" />
+                            <span className="text-xs font-bold text-zinc-900 dark:text-white">{team.playerIds.length} spelare</span>
+                          </div>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1">
                         <button
@@ -673,11 +834,12 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
                                 onClick={() => togglePlayerInTeam(team.id, player.id)}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                                   isSelected 
-                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' 
+                                    ? 'text-white shadow-md' 
                                     : (isInOtherTeam || isJoker)
                                       ? 'bg-zinc-100 border-zinc-100 text-zinc-400 opacity-50 cursor-not-allowed'
                                       : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
                                 }`}
+                                style={isSelected ? { backgroundColor: team.color, borderColor: team.color } : {}}
                                 disabled={isInOtherTeam || isJoker}
                               >
                                 {player.name}
@@ -711,6 +873,61 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, c
               </>
             )}
           </button>
+
+          {(teams.some(t => t.playerIds.length > 0) || jokerPlayerIds.length > 0) && (
+            <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl p-6 border border-zinc-100 dark:border-zinc-800 space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <LayoutList size={18} className="text-zinc-400" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lagöversikt</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {teams.filter(t => t.playerIds.length > 0).map((team, idx) => (
+                  <div key={team.id} className="bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
+                      <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
+                      <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
+                        {team.playerIds.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {team.playerIds.map(pid => {
+                        const player = squad.find(p => p.id === pid);
+                        return player ? (
+                          <div key={pid} className="px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: team.color }}>
+                            {player.name}
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                {jokerPlayerIds.length > 0 && (
+                  <div className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border border-indigo-100 dark:border-indigo-900/30">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-3 h-3 rounded-full bg-indigo-600" />
+                      <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
+                      <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
+                        {jokerPlayerIds.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {jokerPlayerIds.map(pid => {
+                        const player = squad.find(p => p.id === pid);
+                        return player ? (
+                          <div key={pid} className="px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm">
+                            {player.name}
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </form>
       </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Home as HomeIcon, Plus, UserPlus, X, Check, Sun, Moon, Timer as TimerIcon, Edit2, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Users, LayoutDashboard, Calendar, Share2, Lock, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant } from './types';
+import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant, TrainingSession } from './types';
 import { auth, signInWithGoogle, db } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
@@ -20,12 +20,15 @@ import Leaderboard from './components/Leaderboard';
 import LineupBuilder from './components/LineupBuilder';
 
 import TeamPage from './components/TeamPage';
+import TrainingManager from './components/TrainingManager';
+import SessionEditor from './components/SessionEditor';
 
-type View = 'home' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage';
+type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage';
 
 interface CoachData {
   squad: SquadPlayer[];
   exercises: Exercise[];
+  sessions: TrainingSession[];
   lineups: Lineup[];
   activeLineupId: string | null;
   periods: Period[];
@@ -39,6 +42,7 @@ interface CoachData {
 const INITIAL_DATA: CoachData = {
   squad: [],
   exercises: [],
+  sessions: [],
   lineups: [],
   activeLineupId: null,
   periods: [],
@@ -58,8 +62,10 @@ export default function App() {
   });
 
   const [data, setData] = useState<CoachData>(INITIAL_DATA);
-  const { squad, exercises, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations = [], pinnedFormationIds = ['4-2-3-1', '4-4-2', '4-3-3'] } = data;
+  const { squad, exercises, sessions = [], lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations = [], pinnedFormationIds = ['4-2-3-1', '4-4-2', '4-3-3'] } = data;
   const [sessionActionCount, setSessionActionCount] = useState(0);
+  const [linkToMomentId, setLinkToMomentId] = useState<string | null>(null);
+  const [prefilledName, setPrefilledName] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
@@ -69,7 +75,9 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
   
-  const [view, setView] = useState<View>('home');
+  const [view, setView] = useState<View>('training');
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [finishTargetPeriodId, setFinishTargetPeriodId] = useState<string | null>(null);
@@ -105,6 +113,7 @@ export default function App() {
       console.log("App: Loading guest data from localStorage");
       const savedSquad = localStorage.getItem('football_squad');
       const savedExercises = localStorage.getItem('football_exercises');
+      const savedSessions = localStorage.getItem('football_sessions');
       const savedLineups = localStorage.getItem('football_lineups');
       const savedActiveLineupId = localStorage.getItem('active_lineup_id');
       const savedPeriods = localStorage.getItem('football_periods');
@@ -116,6 +125,7 @@ export default function App() {
       const newState: CoachData = {
         squad: savedSquad ? JSON.parse(savedSquad) : [],
         exercises: savedExercises ? JSON.parse(savedExercises) : [],
+        sessions: savedSessions ? JSON.parse(savedSessions) : [],
         lineups: savedLineups ? JSON.parse(savedLineups) : [],
         activeLineupId: savedActiveLineupId || null,
         periods: savedPeriods ? JSON.parse(savedPeriods) : [],
@@ -142,6 +152,7 @@ export default function App() {
     if (isAuthReady && isInitialSyncDone) {
       localStorage.setItem('football_squad', JSON.stringify(squad));
       localStorage.setItem('football_exercises', JSON.stringify(exercises));
+      localStorage.setItem('football_sessions', JSON.stringify(sessions));
       localStorage.setItem('football_lineups', JSON.stringify(lineups));
       localStorage.setItem('active_lineup_id', activeLineupId || '');
       localStorage.setItem('football_periods', JSON.stringify(periods));
@@ -190,6 +201,7 @@ export default function App() {
             if (savedSquad && JSON.parse(savedSquad).length > 0) {
               console.log("App: Found local data, migrating to empty cloud");
               const savedExercises = localStorage.getItem('football_exercises');
+              const savedSessions = localStorage.getItem('football_sessions');
               const savedLineups = localStorage.getItem('football_lineups');
               const savedActiveLineupId = localStorage.getItem('active_lineup_id');
               const savedPeriods = localStorage.getItem('football_periods');
@@ -200,6 +212,7 @@ export default function App() {
               const newState: CoachData = {
                 squad: JSON.parse(savedSquad),
                 exercises: savedExercises ? JSON.parse(savedExercises) : [],
+                sessions: savedSessions ? JSON.parse(savedSessions) : [],
                 lineups: savedLineups ? JSON.parse(savedLineups) : [],
                 activeLineupId: savedActiveLineupId || null,
                 periods: savedPeriods ? JSON.parse(savedPeriods) : [],
@@ -237,6 +250,7 @@ export default function App() {
         const newState: CoachData = {
           squad: cloudData.squad || [],
           exercises: cloudData.exercises || [],
+          sessions: cloudData.sessions || [],
           lineups: cloudData.lineups || [],
           activeLineupId: cloudData.activeLineupId || null,
           periods: cloudData.periods || [],
@@ -252,11 +266,11 @@ export default function App() {
         setSessionActionCount(0); // Reset after applying cloud truth
         
         // Auto-navigate to exercise view if one is active remotely
-        if (newState.activeExerciseId && view === 'home') {
+        if (newState.activeExerciseId && view === 'training') {
           setView('exercise');
         }
         if (!newState.activeExerciseId && view === 'exercise') {
-          setView('home');
+          setView('training');
         }
         
         const syncTime = cloudData.updatedAt || Date.now();
@@ -285,7 +299,7 @@ export default function App() {
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid) return;
         
-        const currentState = { squad, exercises, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds };
+        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds };
         
         // Skip if current state matches what we last saw from cloud
         if (lastCloudDataRef.current) {
@@ -320,7 +334,7 @@ export default function App() {
       const timeout = setTimeout(syncData, 500); // 500ms sync debounce
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone]);
 
   // Sync shared leaderboards globally
   useEffect(() => {
@@ -424,7 +438,8 @@ export default function App() {
     defaultTimerSeconds: number, 
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
-    periodId?: string | null
+    periodId?: string | null,
+    sessionId?: string | null
   ) => {
     const now = Date.now();
     const newExercise: Exercise = {
@@ -441,16 +456,29 @@ export default function App() {
       pointsConfig,
       createdAt: now,
       updatedAt: now,
-      periodId: periodId || null
+      periodId: periodId || null,
+      sessionId: sessionId || (activeSessionId || undefined)
     };
     setData(prev => ({
       ...prev,
       exercises: [newExercise, ...prev.exercises],
       activeLineupId: activeLineupId,
-      activeExerciseId: newExercise.id
+      activeExerciseId: newExercise.id,
+      sessions: linkToMomentId && activeSessionId 
+        ? prev.sessions.map(s => s.id === activeSessionId 
+            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: newExercise.id } : m), updatedAt: Date.now() } 
+            : s)
+        : prev.sessions
     }));
     setSessionActionCount(prev => prev + 1);
-    setView('exercise');
+    
+    if (linkToMomentId || activeSessionId) {
+      setLinkToMomentId(null);
+      setPrefilledName(null);
+      setView('training');
+    } else {
+      setView('exercise');
+    }
   };
 
   const handleSaveEditedExercise = (
@@ -463,7 +491,8 @@ export default function App() {
     defaultTimerSeconds: number, 
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
-    periodId?: string | null
+    periodId?: string | null,
+    sessionId?: string | null
   ) => {
     if (!activeExerciseId) return;
     
@@ -493,13 +522,26 @@ export default function App() {
           jokerPlayerIds,
           pointsConfig,
           updatedAt: Date.now(),
-          periodId: periodId || e.periodId
+          periodId: periodId || e.periodId,
+          sessionId: sessionId || (activeSessionId || e.sessionId)
         };
-      })
+      }),
+      sessions: linkToMomentId && activeSessionId 
+        ? prev.sessions.map(s => s.id === activeSessionId 
+            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: activeExerciseId } : m), updatedAt: Date.now() } 
+            : s)
+        : prev.sessions
     }));
     setSessionActionCount(prev => prev + 1);
     setIsEditingActiveExercise(false);
-    setView('exercise');
+
+    if (linkToMomentId || activeSessionId) {
+      setLinkToMomentId(null);
+      setPrefilledName(null);
+      setView('training');
+    } else {
+      setView('exercise');
+    }
   };
 
   const updateScore = (teamId: string, delta: number) => {
@@ -545,7 +587,7 @@ export default function App() {
     }));
     setSessionActionCount(prev => prev + 1);
     if (activeExerciseId === id) {
-      setView('home');
+      setView('training');
     }
   };
 
@@ -605,6 +647,60 @@ export default function App() {
 
   const handleReorderExercises = (newExercises: Exercise[]) => {
     setData(prev => ({ ...prev, exercises: newExercises }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onNewSession = () => {
+    const newSession: TrainingSession = {
+      id: crypto.randomUUID(),
+      title: '',
+      date: Date.now(),
+      startTime: '18:00',
+      moments: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    setData(prev => ({
+      ...prev,
+      sessions: [newSession, ...(prev.sessions || [])]
+    }));
+    setActiveSessionId(newSession.id);
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onUpdateSession = (updatedSession: TrainingSession) => {
+    setData(prev => ({
+      ...prev,
+      sessions: prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onDeleteSession = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      sessions: prev.sessions.filter(s => s.id !== id)
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const handleCopySession = (id: string) => {
+    setData(prev => {
+      const source = prev.sessions.find(s => s.id === id);
+      if (!source) return prev;
+
+      const newSession: TrainingSession = {
+        ...source,
+        id: Math.random().toString(36).substring(7),
+        title: source.title ? `${source.title} (kopia)` : 'Träning (kopia)',
+        date: Date.now(), // Set to today by default for a copy
+      };
+
+      return {
+        ...prev,
+        sessions: [newSession, ...prev.sessions]
+      };
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -718,7 +814,7 @@ export default function App() {
     }));
     setSessionActionCount(prev => prev + 1);
     setShowFinishConfirm(false);
-    setView('home');
+    setView('training');
   };
 
   const unlockExercise = () => {
@@ -853,7 +949,7 @@ export default function App() {
     if (!user) return;
     setIsSyncing(true);
     const now = Date.now();
-    const currentState = { squad, exercises, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId };
+    const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds };
     try {
       await setDoc(doc(db, 'users', user.uid, 'config', 'state'), {
         ...currentState,
@@ -888,11 +984,15 @@ export default function App() {
         const newState: CoachData = {
           squad: cloudData.squad || [],
           exercises: cloudData.exercises || [],
+          sessions: cloudData.sessions || [],
           lineups: cloudData.lineups || [],
           activeLineupId: cloudData.activeLineupId || null,
           periods: cloudData.periods || [],
           currentPeriodId: cloudData.currentPeriodId || null,
-          activeExerciseId: cloudData.activeExerciseId || null
+          activeExerciseId: cloudData.activeExerciseId || null,
+          teamUrl: cloudData.teamUrl || '',
+          customFormations: cloudData.customFormations || [],
+          pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']
         };
         setData(newState);
         syncUserIdRef.current = user.uid;
@@ -924,7 +1024,7 @@ export default function App() {
     const url = new URL(window.location.href);
     url.searchParams.delete('share');
     window.history.pushState({}, '', url);
-    setView('home');
+    setView('training');
   };
 
   const handleUpdateSquad = (newSquad: SquadPlayer[]) => {
@@ -967,10 +1067,11 @@ export default function App() {
                 if (sharedLeaderboardId) {
                   clearSharedView();
                 } else if (view === 'exercise' || view === 'setup') {
-                  setView('home'); 
+                  setView('training'); 
                   setData(prev => ({ ...prev, activeExerciseId: null }));
                   setSessionActionCount(prev => prev + 1);
                   setIsEditingActiveExercise(false);
+                  // If we have an active session, let it stay active
                 } else if (view === 'lineup') {
                   // No action on header click for lineup view
                 }
@@ -986,18 +1087,19 @@ export default function App() {
                   {(() => {
                     if (view === 'exercise' && activeExercise) return activeExercise.name;
                     if (view === 'setup') return isEditingActiveExercise ? 'Redigera övning' : 'Skapa övning';
+                    if (view === 'training') return 'Planering';
                     if (view === 'squad') return 'Truppen';
                     if (view === 'leaderboard') return 'Topplista';
                     if (view === 'profile') return 'Profil';
                     if (view === 'lineup') return 'Laguppställning';
                     if (view === 'teampage') return 'Lagsidan';
                     if (sharedLeaderboardId) return 'Delad Topplista';
-                    return 'Mina övningar';
+                    return 'Träning';
                   })()}
                 </span>
-                {(view === 'squad' || view === 'leaderboard' || view === 'teampage') && (
+                {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training') && (
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
-                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : 'Webb & Kalender'}
+                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Pass & Övningar' : 'Webb & Kalender'}
                   </span>
                 )}
               </div>
@@ -1105,21 +1207,21 @@ export default function App() {
 
       <main className={`flex-1 flex flex-col ${view === 'exercise' ? 'min-h-0 overflow-hidden' : ''}`}>
         <AnimatePresence mode="wait">
-          {view === 'home' && (
+          {view === 'training' && (
             sharedLeaderboardId ? (
               <motion.div
-                key="home-promo"
+                key="training-promo"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 className="flex-1 flex flex-col items-center justify-center p-8 text-center"
               >
                 <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-6">
-                  <Calendar size={40} />
+                  <Dribbble size={40} />
                 </div>
-                <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-4 tracking-tight">Skapa egna övningar</h2>
+                <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-4 tracking-tight">Planera din träning</h2>
                 <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-8 font-medium leading-relaxed">
-                  Här kan du själv skapa egna övningar. Starta appen som ledare genom att gå till den här sidan.
+                  Här kan du planera dina träningar och skapa övningar. Starta appen som ledare genom att gå till den här sidan.
                 </p>
                 <a
                   href={window.location.origin}
@@ -1130,16 +1232,60 @@ export default function App() {
                 </a>
               </motion.div>
             ) : (
-              <GameList 
-                key="home"
-                exercises={data.exercises} 
-                onSelectExercise={selectExercise} 
-                onDeleteExercise={deleteExercise}
-                onCopyExercise={handleCopyExercise}
-                onEditExercise={handleEditExercise}
-                onReorderExercises={handleReorderExercises}
-                onNewExercise={() => setView('setup')}
-              />
+              <>
+                <TrainingManager 
+                  exercises={exercises} 
+                  sessions={sessions}
+                  squad={squad}
+                  onSelectExercise={(id) => {
+                    setData(prev => ({ ...prev, activeExerciseId: id }));
+                    setView('exercise');
+                  }} 
+                  onDeleteExercise={(id) => {
+                    setData(prev => ({
+                      ...prev,
+                      exercises: prev.exercises.filter(e => e.id !== id)
+                    }));
+                    setSessionActionCount(prev => prev + 1);
+                  }}
+                  onCopyExercise={(id) => {
+                    const ex = exercises.find(e => e.id === id);
+                    if (ex) {
+                      const newEx = {
+                        ...ex,
+                        id: Math.random().toString(36).substring(7),
+                        name: `${ex.name} (kopia)`,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                        isFinished: false
+                      };
+                      setData(prev => ({
+                        ...prev,
+                        exercises: [newEx, ...prev.exercises]
+                      }));
+                      setSessionActionCount(prev => prev + 1);
+                    }
+                  }}
+                  onEditExercise={(id) => {
+                    setData(prev => ({ ...prev, activeExerciseId: id }));
+                    setIsEditingActiveExercise(true);
+                    setView('setup');
+                  }}
+                  onReorderExercises={(reordered) => {
+                    setData(prev => ({ ...prev, exercises: reordered }));
+                    setSessionActionCount(prev => prev + 1);
+                  }}
+                  onNewExercise={() => setView('setup')}
+                  onNewSession={onNewSession}
+                  onSelectSession={id => setActiveSessionId(id)}
+                  onDeleteSession={onDeleteSession}
+                  onCopySession={handleCopySession}
+                  onReorderSessions={(reordered) => {
+                    setData(prev => ({ ...prev, sessions: reordered }));
+                    setSessionActionCount(prev => prev + 1);
+                  }}
+                />
+              </>
             )
           )}
 
@@ -1148,11 +1294,16 @@ export default function App() {
               key="setup" 
               onStartGame={isEditingActiveExercise ? handleSaveEditedExercise : handleStartExercise} 
               squad={squad} 
+              sessionAttendance={activeSessionId ? sessions.find(s => s.id === activeSessionId)?.attendance : undefined}
               currentPeriodId={currentPeriodId}
-              initialGame={isEditingActiveExercise ? exercises.find(e => e.id === activeExerciseId) : undefined}
+              initialGame={isEditingActiveExercise 
+                ? exercises.find(e => e.id === activeExerciseId) 
+                : (prefilledName ? { name: prefilledName, teams: [], icon: 'Dribbble' } as any : undefined)
+              }
               onCancel={() => {
                 setIsEditingActiveExercise(false);
-                setView(activeExerciseId ? 'exercise' : 'home');
+                setPrefilledName(null);
+                setView(activeExerciseId ? 'exercise' : 'training');
               }} 
             />
           )}
@@ -1503,11 +1654,11 @@ export default function App() {
         <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
           <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
             <button
-              onClick={() => setView('home')}
-              className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'home' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
+              onClick={() => setView('training')}
+              className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'training' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <Calendar size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Övningar</span>
+              <Dribbble size={24} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Träning</span>
             </button>
             <button
               onClick={() => setView('leaderboard')}
@@ -1540,6 +1691,44 @@ export default function App() {
           </div>
         </nav>
       )}
+
+      {/* Sessions & Overlays */}
+      <AnimatePresence>
+        {activeSessionId && sessions.find(s => s.id === activeSessionId) && view !== 'exercise' && view !== 'setup' && (
+          <SessionEditor
+            session={sessions.find(s => s.id === activeSessionId)!}
+            exercises={exercises}
+            squad={squad}
+            onUpdate={onUpdateSession}
+            initialMode={sessionMode}
+            onModeChange={setSessionMode}
+            onClose={() => {
+              setActiveSessionId(null);
+              setLinkToMomentId(null);
+            }}
+            onCreateExercise={(name, momentId) => {
+              setLinkToMomentId(momentId);
+              setPrefilledName(name || 'Ny övning');
+              setIsEditingActiveExercise(false);
+              setView('setup');
+              setSessionActionCount(prev => prev + 1);
+              return ""; 
+            }}
+            onSelectExercise={(id) => {
+              setData(prev => ({ ...prev, activeExerciseId: id }));
+              setView('exercise');
+              setSessionActionCount(prev => prev + 1);
+              // We DON'T call setActiveSessionId(null) here because we want to come back to it
+            }}
+            onEditExercise={(id) => {
+              setData(prev => ({ ...prev, activeExerciseId: id }));
+              setIsEditingActiveExercise(true);
+              setView('setup');
+              setSessionActionCount(prev => prev + 1);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Confirmation Modals */}
       <AnimatePresence>
