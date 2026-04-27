@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Calendar, Plus, Trophy, Clock, Trash2, Edit2, Copy, Check, ChevronRight, LayoutList, Dribbble, History, MoreVertical, ListTodo, GripVertical, Users, Play } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { Exercise, TrainingSession } from '../types';
+import { sortPlayersByPosition } from '../lib/teamUtils';
 import GameList from './GameList';
 
 interface TrainingManagerProps {
@@ -19,6 +20,7 @@ interface TrainingManagerProps {
   onDeleteSession: (id: string) => void;
   onCopySession: (id: string) => void;
   onReorderSessions: (sessions: TrainingSession[]) => void;
+  onUpdateSession: (updated: TrainingSession) => void;
 }
 
 function SessionItem({ 
@@ -27,7 +29,8 @@ function SessionItem({
   totalMinutes, 
   onSelectSession, 
   setSessionToDelete,
-  onCopySession 
+  onCopySession,
+  onUpdateSession 
 }: { 
   session: TrainingSession, 
   date: string, 
@@ -35,6 +38,7 @@ function SessionItem({
   onSelectSession: (id: string) => void, 
   setSessionToDelete: (id: string) => void,
   onCopySession: (id: string) => void,
+  onUpdateSession: (updated: TrainingSession) => void,
   key?: string
 }) {
   const dragControls = useDragControls();
@@ -83,27 +87,41 @@ function SessionItem({
             <ListTodo size={12} />
             {session.moments.length} moment
             <div className="mx-2 h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
-            <div className="flex items-center gap-1">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCopySession(session.id);
-                }}
-                className="p-1 hover:text-indigo-500 transition-colors"
-                title="Kopiera pass"
-              >
-                <Copy size={14} />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSessionToDelete(session.id);
-                }}
-                className="p-1 hover:text-red-500 transition-colors"
-                title="Radera pass"
-              >
-                <Trash2 size={14} />
-              </button>
+            <div className="flex items-center gap-2">
+              {!session.isCompleted && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdateSession({ ...session, isCompleted: true });
+                  }}
+                  className="flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 px-2 py-1 rounded-lg border border-green-100 dark:border-green-900/30 hover:bg-green-100 transition-all font-black"
+                >
+                  <Check size={12} strokeWidth={3} />
+                  Klarmarkera
+                </button>
+              )}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCopySession(session.id);
+                  }}
+                  className="p-1 hover:text-indigo-500 transition-colors"
+                  title="Kopiera träningspass"
+                >
+                  <Copy size={14} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSessionToDelete(session.id);
+                  }}
+                  className="p-1 hover:text-red-500 transition-colors"
+                  title="Radera träningspass"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -137,9 +155,11 @@ export default function TrainingManager({
   onSelectSession,
   onDeleteSession,
   onCopySession,
-  onReorderSessions
+  onReorderSessions,
+  onUpdateSession
 }: TrainingManagerProps) {
   const [activeTab, setActiveTab] = useState<'sessions' | 'exercises'>('sessions');
+  const [sessionFilter, setSessionFilter] = useState<'planned' | 'completed'>('planned');
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
 
@@ -201,11 +221,12 @@ export default function TrainingManager({
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {team.playerIds?.map(pid => {
+                        {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
                           const player = squad.find(p => p.id === pid);
                           return player ? (
                             <div key={pid} className="px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm" style={{ backgroundColor: team.color }}>
                               {player.name}
+                              {player.position && <span className="ml-1 opacity-70 text-[8px]">({player.position})</span>}
                             </div>
                           ) : null;
                         })}
@@ -226,11 +247,12 @@ export default function TrainingManager({
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {exercises.find(e => e.id === selectedExerciseForTeams)?.jokerPlayerIds?.map(pid => {
+                        {sortPlayersByPosition(exercises.find(e => e.id === selectedExerciseForTeams)?.jokerPlayerIds || [], squad).map(pid => {
                           const player = squad.find(p => p.id === pid);
                           return player ? (
                             <div key={pid} className="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 shadow-sm">
                               {player.name}
+                              {player.position && <span className="ml-1 opacity-70 text-[8px]">({player.position})</span>}
                             </div>
                           ) : null;
                         })}
@@ -250,7 +272,7 @@ export default function TrainingManager({
                   className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-3 hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none uppercase tracking-wide active:scale-[0.98]"
                 >
                   <Play size={20} fill="currentColor" />
-                  Starta övning nu
+                  Starta tävlingsmoment nu
                 </button>
               </div>
             </motion.div>
@@ -269,7 +291,7 @@ export default function TrainingManager({
           }`}
         >
           <Calendar size={18} />
-          <span>Pass</span>
+          <span>Träningspass</span>
         </button>
         <button
           onClick={() => setActiveTab('exercises')}
@@ -280,62 +302,98 @@ export default function TrainingManager({
           }`}
         >
           <Dribbble size={18} />
-          <span>Övningar</span>
+          <span>Tävlingsmoment</span>
         </button>
       </div>
 
       {activeTab === 'sessions' ? (
         <div className="px-4 sm:px-0">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-black text-zinc-900 dark:text-white">Planerade pass</h2>
-              <p className="text-sm text-zinc-500">Strukturera dina träningar minut för minut</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex bg-zinc-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                <button
+                  onClick={() => setSessionFilter('planned')}
+                  className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all ${
+                    sessionFilter === 'planned' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
+                  }`}
+                >
+                  Planerade
+                </button>
+                <button
+                  onClick={() => setSessionFilter('completed')}
+                  className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all ${
+                    sessionFilter === 'completed' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
+                  }`}
+                >
+                  Genomförda
+                </button>
+              </div>
             </div>
             <button
               onClick={onNewSession}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
+              className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
             >
               <Plus size={18} />
-              Planera pass
+              Planera träningspass
             </button>
           </div>
 
-          {sessions.length === 0 ? (
+          {[...sessions].filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted).length === 0 ? (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 sm:p-12 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800">
               <div className="w-16 h-16 bg-zinc-50 dark:bg-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-zinc-400">
                 <Calendar size={32} />
               </div>
-              <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">Inga pass planerade</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8">Börja planera din nästa träning genom att lägga till moment och tider.</p>
-              <button
-                onClick={onNewSession}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all"
-              >
-                Planera ditt första pass
-              </button>
+              <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
+                Inga {sessionFilter === 'completed' ? 'genomförda' : 'planerade'} träningspass
+              </h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8">
+                {sessionFilter === 'completed' 
+                  ? 'När du markerar ett träningspass som genomfört hamnar det här.'
+                  : 'Börja planera din nästa träning genom att lägga till tävlingsmoment och tider.'}
+              </p>
+              {sessionFilter === 'planned' && (
+                <button
+                  onClick={onNewSession}
+                  className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all"
+                >
+                  Planera ditt första träningspass
+                </button>
+              )}
             </div>
           ) : (
-            <Reorder.Group axis="y" values={sessions} onReorder={handleReorder} className="grid gap-4">
-              {sessions.map((session) => {
-                const date = new Date(session.date).toLocaleDateString('sv-SE', {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long'
-                });
-                const totalMinutes = session.moments.reduce((acc, m) => acc + m.duration, 0);
+            <Reorder.Group 
+              axis="y" 
+              values={sessions.filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted)} 
+              onReorder={(newOrder) => {
+                // We need to merge the reordered filtered list back into the main list
+                const otherCategory = sessions.filter(s => sessionFilter === 'completed' ? !s.isCompleted : s.isCompleted);
+                onReorderSessions([...newOrder, ...otherCategory]);
+              }} 
+              className="grid gap-4"
+            >
+              {[...sessions]
+                .filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted)
+                .map((session) => {
+                  const date = new Date(session.date).toLocaleDateString('sv-SE', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long'
+                  });
+                  const totalMinutes = session.moments.reduce((acc, m) => acc + m.duration, 0);
 
-                return (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    date={date}
-                    totalMinutes={totalMinutes}
-                    onSelectSession={onSelectSession}
-                    setSessionToDelete={setSessionToDelete}
-                    onCopySession={onCopySession}
-                  />
-                );
-              })}
+                  return (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      date={date}
+                      totalMinutes={totalMinutes}
+                      onSelectSession={onSelectSession}
+                      setSessionToDelete={setSessionToDelete}
+                      onCopySession={onCopySession}
+                      onUpdateSession={onUpdateSession}
+                    />
+                  );
+                })}
             </Reorder.Group>
           )}
         </div>
@@ -370,7 +428,7 @@ export default function TrainingManager({
               className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Radera pass?</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Radera träningspass?</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-8 font-medium">
                 Är du säker på att du vill radera "{sessions.find(s => s.id === sessionToDelete)?.title}"? Detta tar bort planeringen permanent.
               </p>

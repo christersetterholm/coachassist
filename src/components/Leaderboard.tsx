@@ -283,7 +283,7 @@ export default function Leaderboard({
 
   const getSubtitle = (player: any) => {
     if (player.history && player.history.length > 0) {
-      return `${player.history.length} övningar med poäng`;
+      return `${player.history.length} tävlingsmoment med poäng`;
     }
     if (sharedId) {
       return 'Inga poäng registrerade';
@@ -497,7 +497,7 @@ export default function Leaderboard({
           <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Ingen data än</h3>
           <p className="text-zinc-500 dark:text-zinc-400">
             {selectedPeriodId === 'current' 
-              ? 'Starta en period och genomför övningar för att se poängligan.' 
+              ? 'Starta en period och genomför tävlingsmoment för att se poängligan.' 
               : 'Inga poäng registrerade för denna period.'}
           </p>
         </div>
@@ -636,7 +636,7 @@ export default function Leaderboard({
               </div>
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Avsluta tävling?</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center">
-                Detta arkiverar poängställningen för "{periods.find(p => p.id === selectedPeriodId)?.name}". Du kan fortfarande se resultatet senare, men inga nya övningar kan läggas till i denna tävling.
+                Detta arkiverar poängställningen för "{periods.find(p => p.id === selectedPeriodId)?.name}". Du kan fortfarande se resultatet senare, men inga nya tävlingsmoment kan läggas till i denna tävling.
               </p>
               
               <div className="flex flex-col gap-3 pt-2">
@@ -680,7 +680,7 @@ export default function Leaderboard({
               </div>
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Ta bort period?</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-8 text-center">
-                Är du säker på att du vill ta bort denna period? Detta går inte att ångra. Övningar som tillhörde perioden kommer att finnas kvar men inte längre vara kopplade till en period.
+                Är du säker på att du vill ta bort denna period? Detta går inte att ångra. Tävlingsmoment som tillhörde perioden kommer att finnas kvar men inte längre vara kopplade till en period.
               </p>
               
               <div className="flex flex-col gap-3">

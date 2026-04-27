@@ -10,13 +10,34 @@ interface PlayerCardProps {
   onUpdateScore: (id: string, delta: number) => void;
   onRankClick?: () => void;
   disabled?: boolean;
+  exerciseId?: string;
+  onMovePlayer?: (exerciseId: string, playerId: string, targetTeamId: string) => void;
+  draggedPlayerId?: string | null;
+  isAnyPlayerDragging?: boolean;
+  onDragStart?: (playerId: string) => void;
+  onDragEnd?: () => void;
 }
 
-export default function PlayerCard({ team, squad, rank, onUpdateScore, onRankClick, disabled }: PlayerCardProps) {
+export default function PlayerCard({ 
+  team, 
+  squad, 
+  rank, 
+  onUpdateScore, 
+  onRankClick, 
+  disabled, 
+  exerciseId, 
+  onMovePlayer,
+  draggedPlayerId,
+  isAnyPlayerDragging,
+  onDragStart,
+  onDragEnd
+}: PlayerCardProps) {
   const [fontSize, setFontSize] = useState<number>(120);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isOver, setIsOver] = useState(false);
 
   const teamPlayers = squad.filter(p => team.playerIds.includes(p.id));
+  const isThisPlayerDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
 
   useLayoutEffect(() => {
     if (!containerRef.current) return;
@@ -44,13 +65,42 @@ export default function PlayerCard({ team, squad, rank, onUpdateScore, onRankCli
     return () => observer.disconnect();
   }, [team.score]);
 
+  const handleDragEnd = (playerId: string, info: any) => {
+    onDragEnd?.();
+    setIsOver(false);
+    if (!exerciseId || !onMovePlayer) return;
+    
+    // elementsFromPoint is more robust as it finds all layers under the point
+    const elements = document.elementsFromPoint(info.point.x, info.point.y);
+    // Find the first team element that is NOT the source team
+    const teamElement = elements
+      .map(el => (el as HTMLElement).closest?.('[data-team-id]'))
+      .find(te => te && te.getAttribute('data-team-id') !== team.id);
+ 
+    if (teamElement) {
+      const targetTeamId = teamElement.getAttribute('data-team-id');
+      if (targetTeamId && targetTeamId !== team.id) {
+        onMovePlayer(exerciseId, playerId, targetTeamId);
+      }
+    }
+  };
+
   return (
     <motion.div
       layout
       initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className={`relative rounded-2xl shadow-lg flex items-stretch transition-all duration-300 border border-black/5 flex-1 min-h-0 overflow-hidden ${disabled ? 'opacity-90' : ''}`}
-      style={{ backgroundColor: team.color }}
+      animate={{ 
+        opacity: 1, 
+        scale: isOver || isAnyPlayerDragging ? 1.02 : 1,
+        boxShadow: isOver ? `0 0 20px ${team.color}40` : '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+        backgroundColor: isAnyPlayerDragging ? `${team.color}EE` : team.color,
+        borderColor: isOver ? 'rgba(255,255,255,0.5)' : (isAnyPlayerDragging ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.05)'),
+        zIndex: isThisPlayerDragging ? 100 : (isAnyPlayerDragging ? 10 : 1)
+      }}
+      data-team-id={team.id}
+      onMouseEnter={() => isAnyPlayerDragging && setIsOver(true)}
+      onMouseLeave={() => setIsOver(false)}
+      className={`relative rounded-2xl flex items-stretch transition-all duration-300 border flex-1 min-h-0 ${disabled ? 'opacity-90' : ''}`}
     >
       {/* Minus Button */}
       {!disabled && (
@@ -68,9 +118,22 @@ export default function PlayerCard({ team, squad, rank, onUpdateScore, onRankCli
           <div className="flex flex-wrap justify-center gap-1 px-2">
             {teamPlayers.length > 0 ? (
               teamPlayers.map(p => (
-                <span key={p.id} className="text-[8px] sm:text-[10px] font-bold text-white/80 bg-white/10 px-1.5 py-0.5 rounded-full">
+                <motion.span 
+                  key={p.id} 
+                  drag={!disabled}
+                  dragSnapToOrigin
+                  onDragStart={() => onDragStart?.(p.id)}
+                  onDragEnd={(e, info) => handleDragEnd(p.id, info)}
+                  whileTap={{ scale: 0.95 }}
+                  whileDrag={{ 
+                    zIndex: 9999, 
+                    scale: 1.1,
+                    pointerEvents: 'none'
+                  }}
+                  className={`text-[8px] sm:text-[10px] font-bold text-white/80 bg-white/10 px-1.5 py-0.5 rounded-full cursor-grab active:cursor-grabbing touch-none z-50`}
+                >
                   {p.name}
-                </span>
+                </motion.span>
               ))
             ) : (
               <span className="text-[8px] sm:text-[10px] font-bold text-white/40 italic">Inga spelare</span>

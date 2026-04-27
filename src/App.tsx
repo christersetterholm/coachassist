@@ -22,6 +22,7 @@ import LineupBuilder from './components/LineupBuilder';
 import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
 import SessionEditor from './components/SessionEditor';
+import TeamOverviewModal from './components/TeamOverviewModal';
 
 type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage';
 
@@ -82,6 +83,7 @@ export default function App() {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [finishTargetPeriodId, setFinishTargetPeriodId] = useState<string | null>(null);
   const [isEditingActiveExercise, setIsEditingActiveExercise] = useState(false);
+  const [showTeamOverview, setShowTeamOverview] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
@@ -689,16 +691,50 @@ export default function App() {
       const source = prev.sessions.find(s => s.id === id);
       if (!source) return prev;
 
+      const newExercises: Exercise[] = [];
+      const newMoments = source.moments.map(m => {
+        if (m.exerciseId) {
+          const sourceExercise = prev.exercises.find(e => e.id === m.exerciseId);
+          if (sourceExercise) {
+            const newExId = crypto.randomUUID();
+            const newEx: Exercise = {
+              ...sourceExercise,
+              id: newExId,
+              name: sourceExercise.name,
+              date: Date.now(),
+              isFinished: false,
+              sessionId: source.id, // Will be updated to newSession.id later if needed
+              teams: sourceExercise.teams.map(t => ({ ...t, id: crypto.randomUUID(), score: 0, playerIds: [] })),
+              jokerPlayerIds: [],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              periodId: currentPeriodId // Assign to current active period
+            };
+            newExercises.push(newEx);
+            return { ...m, id: crypto.randomUUID(), exerciseId: newExId };
+          }
+        }
+        return { ...m, id: crypto.randomUUID() };
+      });
+
       const newSession: TrainingSession = {
         ...source,
-        id: Math.random().toString(36).substring(7),
+        id: crypto.randomUUID(),
         title: source.title ? `${source.title} (kopia)` : 'Träning (kopia)',
-        date: Date.now(), // Set to today by default for a copy
+        date: Date.now(),
+        isCompleted: false, // Always start as planned
+        moments: newMoments,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       };
+
+      // Ensure copied exercises refer to the NEW session ID
+      const finalizedExercises = newExercises.map(e => ({ ...e, sessionId: newSession.id }));
 
       return {
         ...prev,
-        sessions: [newSession, ...prev.sessions]
+        sessions: [newSession, ...prev.sessions],
+        exercises: [...finalizedExercises, ...prev.exercises]
       };
     });
     setSessionActionCount(prev => prev + 1);
@@ -722,7 +758,8 @@ export default function App() {
         name: `${source.name} (kopia)`,
         date: now,
         isFinished: false,
-        teams: source.teams.map(t => ({ ...t, id: crypto.randomUUID(), playerIds: t.playerIds || [], score: 0 })),
+        teams: source.teams.map(t => ({ ...t, id: crypto.randomUUID(), playerIds: [], score: 0 })),
+        jokerPlayerIds: [],
         createdAt: now,
         updatedAt: now,
         periodId: currentPeriodId
@@ -923,6 +960,45 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  const movePlayer = (exerciseId: string, playerId: string, targetTeamId: string) => {
+    setData(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(e => {
+        if (e.id !== exerciseId) return e;
+        
+        // Remove player from all teams and joker list first
+        const updatedTeams = e.teams.map(t => ({
+          ...t,
+          playerIds: (t.playerIds || []).filter(id => id !== playerId)
+        }));
+        const updatedJokerIds = (e.jokerPlayerIds || []).filter(id => id !== playerId);
+        
+        // If target is "joker", add to joker list
+        if (targetTeamId === 'joker') {
+          return {
+            ...e,
+            teams: updatedTeams,
+            jokerPlayerIds: [...updatedJokerIds, playerId],
+            updatedAt: Date.now()
+          };
+        }
+        
+        // Add to target team
+        return {
+          ...e,
+          teams: updatedTeams.map(t => 
+            t.id === targetTeamId ? { ...t, playerIds: [...t.playerIds, playerId] } : t
+          ),
+          jokerPlayerIds: updatedJokerIds,
+          updatedAt: Date.now()
+        };
+      })
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+
   const sortedScores = activeExercise ? Array.from(new Set(activeExercise.teams.map(t => t.score))).sort((a: number, b: number) => b - a) : [];
 
   const toggleTheme = () => {
@@ -1028,18 +1104,16 @@ export default function App() {
   };
 
   const handleUpdateSquad = (newSquad: SquadPlayer[]) => {
-    let changed = false;
     setData(prev => {
       if (JSON.stringify(prev.squad) === JSON.stringify(newSquad)) {
         return prev;
       }
-      changed = true;
       return { 
         ...prev, 
         squad: newSquad
       };
     });
-    if (changed) setSessionActionCount(prev => prev + 1);
+    setSessionActionCount(prev => prev + 1);
   };
 
   const activeLineup = lineups.find(l => l.id === activeLineupId) || null;
@@ -1086,7 +1160,7 @@ export default function App() {
                 <span className="font-black text-xl tracking-tight dark:text-white truncate">
                   {(() => {
                     if (view === 'exercise' && activeExercise) return activeExercise.name;
-                    if (view === 'setup') return isEditingActiveExercise ? 'Redigera övning' : 'Skapa övning';
+                    if (view === 'setup') return isEditingActiveExercise ? 'Redigera tävlingsmoment' : 'Skapa tävlingsmoment';
                     if (view === 'training') return 'Planering';
                     if (view === 'squad') return 'Truppen';
                     if (view === 'leaderboard') return 'Topplista';
@@ -1099,7 +1173,7 @@ export default function App() {
                 </span>
                 {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training') && (
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
-                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Pass & Övningar' : 'Webb & Kalender'}
+                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Träningspass & Tävlingsmoment' : 'Webb & Kalender'}
                   </span>
                 )}
               </div>
@@ -1143,14 +1217,25 @@ export default function App() {
                       </button>
                     )
                   )}
-                  <button
-                    type="button"
-                    onClick={toggleTheme}
-                    className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                    title={theme === 'light' ? 'Mörkt läge' : 'Ljust läge'}
-                  >
-                    {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-                  </button>
+                  {view === 'exercise' ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowTeamOverview(true)}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30"
+                      title="Visa lagöversikt"
+                    >
+                      <Users size={20} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                      title={theme === 'light' ? 'Mörkt läge' : 'Ljust läge'}
+                    >
+                      {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+                    </button>
+                  )}
                 </>
               )}
               {view === 'exercise' && activeExercise && (
@@ -1165,7 +1250,7 @@ export default function App() {
                   <button
                     onClick={() => setIsEditingActiveExercise(true)}
                     className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
-                    title="Redigera övning"
+                    title="Redigera tävlingsmoment"
                   >
                     <Edit2 size={20} />
                   </button>
@@ -1221,7 +1306,7 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-4 tracking-tight">Planera din träning</h2>
                 <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-8 font-medium leading-relaxed">
-                  Här kan du planera dina träningar och skapa övningar. Starta appen som ledare genom att gå till den här sidan.
+                  Här kan du planera dina träningar och skapa tävlingsmoment. Starta appen som ledare genom att gå till den här sidan.
                 </p>
                 <a
                   href={window.location.origin}
@@ -1280,6 +1365,7 @@ export default function App() {
                   onSelectSession={id => setActiveSessionId(id)}
                   onDeleteSession={onDeleteSession}
                   onCopySession={handleCopySession}
+                  onUpdateSession={onUpdateSession}
                   onReorderSessions={(reordered) => {
                     setData(prev => ({ ...prev, sessions: reordered }));
                     setSessionActionCount(prev => prev + 1);
@@ -1295,6 +1381,7 @@ export default function App() {
               onStartGame={isEditingActiveExercise ? handleSaveEditedExercise : handleStartExercise} 
               squad={squad} 
               sessionAttendance={activeSessionId ? sessions.find(s => s.id === activeSessionId)?.attendance : undefined}
+              sessions={sessions}
               currentPeriodId={currentPeriodId}
               initialGame={isEditingActiveExercise 
                 ? exercises.find(e => e.id === activeExerciseId) 
@@ -1455,7 +1542,7 @@ export default function App() {
                           <span className="text-sm font-bold">{squad.length} spelare</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-sm text-zinc-500">Övningar</span>
+                          <span className="text-sm text-zinc-500">Tävlingsmoment</span>
                           <span className="text-sm font-bold">{exercises.length} st</span>
                         </div>
                         <div className="flex justify-between items-center">
@@ -1639,6 +1726,12 @@ export default function App() {
                         onUpdateScore={updateScore}
                         onRankClick={handleRankClick}
                         disabled={activeExercise.isFinished}
+                        exerciseId={activeExercise.id}
+                        onMovePlayer={movePlayer}
+                        draggedPlayerId={draggedPlayerId}
+                        isAnyPlayerDragging={!!draggedPlayerId}
+                        onDragStart={(pid) => setDraggedPlayerId(pid)}
+                        onDragEnd={() => setDraggedPlayerId(null)}
                       />
                     </motion.div>
                   ))}
@@ -1692,6 +1785,17 @@ export default function App() {
         </nav>
       )}
 
+      <AnimatePresence>
+        {showTeamOverview && activeExercise && (
+          <TeamOverviewModal
+            exercise={activeExercise}
+            squad={squad}
+            onMovePlayer={movePlayer}
+            onClose={() => setShowTeamOverview(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sessions & Overlays */}
       <AnimatePresence>
         {activeSessionId && sessions.find(s => s.id === activeSessionId) && view !== 'exercise' && view !== 'setup' && (
@@ -1702,13 +1806,14 @@ export default function App() {
             onUpdate={onUpdateSession}
             initialMode={sessionMode}
             onModeChange={setSessionMode}
+            onMovePlayer={movePlayer}
             onClose={() => {
               setActiveSessionId(null);
               setLinkToMomentId(null);
             }}
             onCreateExercise={(name, momentId) => {
               setLinkToMomentId(momentId);
-              setPrefilledName(name || 'Ny övning');
+              setPrefilledName(name || 'Nytt tävlingsmoment');
               setIsEditingActiveExercise(false);
               setView('setup');
               setSessionActionCount(prev => prev + 1);
@@ -1788,7 +1893,7 @@ export default function App() {
               <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center text-green-600 dark:text-green-400 mb-6 mx-auto">
                 <Trophy size={32} />
               </div>
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Avsluta övningen?</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Avsluta tävlingsmomentet?</h3>
               
               <div className="mb-6">
                 <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 text-center">
@@ -1822,7 +1927,7 @@ export default function App() {
                   onClick={() => setShowFinishConfirm(false)}
                   className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
                 >
-                  Fortsätt övningen
+                  Fortsätt tävlingsmomentet
                 </button>
               </div>
             </motion.div>

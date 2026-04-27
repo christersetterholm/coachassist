@@ -1,11 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { UserPlus, Trash2, Edit2, X, Check, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth } from '../lib/firebase';
+import { auth, storage } from '../lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Player, SquadPlayer } from '../types';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
+import { CachedImage } from './CachedImage';
 
 interface SquadManagerProps {
   squad: SquadPlayer[];
@@ -112,54 +114,20 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
     setIsUploading(true);
 
     try {
-      // Helper to compress and resize the image to a small Base64 string
-      const compressImage = (blob: Blob): Promise<string> => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.src = URL.createObjectURL(blob);
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            // We only need a small avatar-sized image (128x128)
-            const MAX_SIZE = 128;
-            let width = img.width;
-            let height = img.height;
+      // Use Firebase Storage for squad photos to keep Firestore small
+      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+      const fileName = `photo_${Date.now()}.${extension}`;
+      const playerPath = editingPlayer ? `squad/${editingPlayer.id}/${fileName}` : `squad/temp/${fileName}`;
+      const storageRef = ref(storage, playerPath);
+      
+      const uploadResult = await uploadBytes(storageRef, croppedBlob);
+      const downloadURL = await getDownloadURL(uploadResult.ref);
 
-            if (width > height) {
-              if (width > MAX_SIZE) {
-                height *= MAX_SIZE / width;
-                width = MAX_SIZE;
-              }
-            } else {
-              if (height > MAX_SIZE) {
-                width *= MAX_SIZE / height;
-                height = MAX_SIZE;
-              }
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            
-            // Set background to white for JPEGs (otherwise transparent pngs become black)
-            if (ctx) {
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(0, 0, width, height);
-              ctx.drawImage(img, 0, 0, width, height);
-            }
-            
-            // Use lower quality for ultra-small size, 0.4 is perfect for tiny avatars
-            const base64 = canvas.toDataURL('image/jpeg', 0.4);
-            resolve(base64);
-            URL.revokeObjectURL(img.src);
-          };
-        });
-      };
-
-      const base64Url = await compressImage(croppedBlob);
-      setNewPhotoUrl(base64Url);
-    } catch (err) {
-      console.error('Photo processing error:', err);
-      alert('Kunde inte bearbeta bilden. Försök med en mindre fil eller en annan bild.');
+      // Always update the local state so the preview works in both Add and Edit modes
+      setNewPhotoUrl(downloadURL);
+    } catch (error) {
+      console.error("Upload error", error);
+      alert("Kunde inte ladda upp bilden till molnet. Kontrollera behörigheterna i Firebase.");
     } finally {
       setIsUploading(false);
     }
@@ -169,13 +137,23 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
     // rows is an array of [name, position, number, photoUrl]
     const newPlayers: SquadPlayer[] = rows
       .map(row => {
-        const name = row[0]?.trim();
+        let name = row[0]?.trim();
         const position = row[1]?.trim();
         const number = row[2]?.trim();
         const photoUrl = row[3]?.trim();
+
+        // Specific cleanup for laget.se exports that include "Deltar" status
+        if (name && name.endsWith(' Deltar')) {
+          name = name.substring(0, name.length - 7).trim();
+        }
+
         return { name, position, number, photoUrl };
       })
-      .filter(p => p.name && p.name.toLowerCase() !== 'namn' && p.name.toLowerCase() !== 'name')
+      .filter(p => {
+        if (!p.name) return false;
+        const lowerName = p.name.toLowerCase();
+        return lowerName !== 'namn' && lowerName !== 'name' && lowerName !== 'deltar' && lowerName !== 'deltar:';
+      })
       .map(p => ({
         id: crypto.randomUUID(),
         name: p.name,
@@ -237,7 +215,13 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
     <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-32">
       <div className="flex items-center justify-end gap-2 mb-8">
         <button
-          onClick={() => setIsAdding(true)}
+          onClick={() => {
+            setNewName('');
+            setNewPosition('');
+            setNewNumber('');
+            setNewPhotoUrl('');
+            setIsAdding(true);
+          }}
           className="p-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none"
           title="Lägg till spelare"
         >
@@ -371,7 +355,13 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     {isUploading ? (
                       <Loader2 size={32} className="animate-spin text-indigo-600" />
                     ) : newPhotoUrl ? (
-                      <img src={newPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
+                      <CachedImage 
+                        src={newPhotoUrl} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover" 
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <Users size={32} />
                     )}
@@ -451,7 +441,13 @@ Kalle Karlsson	Mittback	4	https://image.url"
                 <div className="relative">
                   <div className="w-12 h-12 rounded-2xl overflow-hidden bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black border border-zinc-100 dark:border-zinc-800 shadow-inner">
                     {player.photoUrl ? (
-                      <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" />
+                      <CachedImage 
+                        src={player.photoUrl} 
+                        alt={player.name} 
+                        className="w-full h-full object-cover" 
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <span className="text-lg">{player.name.charAt(0).toUpperCase()}</span>
                     )}
@@ -532,7 +528,13 @@ Kalle Karlsson	Mittback	4	https://image.url"
                       {isUploading ? (
                         <Loader2 size={32} className="animate-spin text-indigo-600" />
                       ) : newPhotoUrl ? (
-                        <img src={newPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
+                        <CachedImage 
+                          src={newPhotoUrl} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover" 
+                          loading="lazy"
+                          decoding="async"
+                        />
                       ) : (
                         <Users size={32} />
                       )}

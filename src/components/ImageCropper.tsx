@@ -66,22 +66,43 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
 
     ctx.drawImage(image, 0, 0);
 
-    const data = ctx.getImageData(
+    const maxSize = 400;
+    let targetWidth = pixelCrop.width;
+    let targetHeight = pixelCrop.height;
+
+    if (targetWidth > maxSize || targetHeight > maxSize) {
+      if (targetWidth > targetHeight) {
+        targetHeight = (maxSize / targetWidth) * targetHeight;
+        targetWidth = maxSize;
+      } else {
+        targetWidth = (maxSize / targetHeight) * targetWidth;
+        targetHeight = maxSize;
+      }
+    }
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    ctx.drawImage(
+      image,
       pixelCrop.x,
       pixelCrop.y,
       pixelCrop.width,
-      pixelCrop.height
+      pixelCrop.height,
+      0,
+      0,
+      targetWidth,
+      targetHeight
     );
 
-    canvas.width = pixelCrop.width;
-    canvas.height = pixelCrop.height;
-
-    ctx.putImageData(data, 0, 0);
-
     return new Promise((resolve) => {
+      const isPng = imageSrc.startsWith('data:image/png');
+      const mimeType = isPng ? 'image/png' : 'image/jpeg';
+      const quality = 0.8;
+
       canvas.toBlob((file) => {
         if (file) resolve(file);
-      }, 'image/jpeg');
+      }, mimeType, quality);
     });
   };
 

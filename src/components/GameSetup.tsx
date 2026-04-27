@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, Minus, Trash2, Play, UserPlus, Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList } from 'lucide-react';
+import { Plus, Minus, Trash2, Play, UserPlus, Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, PRESET_COLORS, GAME_ICONS, Exercise, Team, PointsConfig } from '../types';
+import { SquadPlayer, PRESET_COLORS, GAME_ICONS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
+import { sortPlayersByPosition } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
 
 const ICON_MAP: Record<string, any> = {
@@ -26,6 +27,7 @@ interface GameSetupProps {
   onCancel?: () => void;
   squad: SquadPlayer[];
   sessionAttendance?: string[];
+  sessions?: TrainingSession[];
   currentPeriodId: string | null;
   key?: React.Key;
 }
@@ -38,7 +40,7 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, currentPeriodId }: GameSetupProps) {
+export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, sessions, currentPeriodId }: GameSetupProps) {
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon, setSelectedIcon] = useState(initialGame?.icon || 'Dribbble');
   const [showAllIcons, setShowAllIcons] = useState(false);
@@ -55,6 +57,17 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     initialGame && !sessionAttendance ? initialGame.teams.flatMap(t => t.playerIds) : []
   );
   const [showStandaloneAttendance, setShowStandaloneAttendance] = useState(false);
+  const [showTimerSettings, setShowTimerSettings] = useState(false);
+  const [showPointsSettings, setShowPointsSettings] = useState(false);
+  const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+  
+  // Find linked session if any
+  const linkedSession = sessions?.find(s => s.id === (initialGame?.sessionId || 'active') || s.attendance === sessionAttendance);
+  const sessionTitle = linkedSession?.title || 'pågående träningspass';
+  
+  // Derived helper to identify currently attending players (either from session or standalone)
+  const currentAttendanceIds = sessionAttendance || standaloneAttendance;
+  const isAttendanceActive = Array.isArray(sessionAttendance) || standaloneAttendance.length > 0;
   
   const [teams, setTeams] = useState<Omit<Team, 'score'>[]>(
     initialGame?.teams.map(({ score, ...t }) => t) || [
@@ -110,7 +123,18 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     const navyBlue = "#1e3a8a"; 
     
     if (isIndividual) {
-      squad.forEach((player) => {
+      // Only include attending players if attendance is active
+      const playersToDistribute = isAttendanceActive 
+        ? squad.filter(p => currentAttendanceIds.includes(p.id))
+        : squad;
+
+      // If we are in a session but NO ONE is attending, we should probably warn or just show 0 teams if isIndividual
+      if (isAttendanceActive && playersToDistribute.length === 0) {
+        alert("Inga spelare är markerade som närvarande. Gå till fliken 'Deltagare' i träningen för att markera vilka som är där.");
+        return;
+      }
+
+      playersToDistribute.forEach((player) => {
         newTeams.push({ 
           id: crypto.randomUUID(), 
           name: '', 
@@ -209,7 +233,14 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
 
   const generateTeamsFromSessionAttendance = () => {
     const list = sessionAttendance || standaloneAttendance;
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0) {
+      if (isAttendanceActive) {
+        alert("Inga spelare är markerade som närvarande i träningen. Gå till fliken 'Deltagare' för att markera vilka som är där.");
+      } else {
+        alert("Ingen närvarolista hittades.");
+      }
+      return;
+    }
 
     const attendingPlayers: SquadPlayer[] = [];
 
@@ -269,6 +300,46 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     setJokerPlayerIds([]);
   };
 
+  const movePlayerInternal = (playerId: string, targetTeamId: string) => {
+    // Remove from all teams and joker list first
+    const updatedTeams = teams.map(t => ({
+      ...t,
+      playerIds: t.playerIds.filter(id => id !== playerId)
+    }));
+    const updatedJokerIds = jokerPlayerIds.filter(id => id !== playerId);
+    
+    if (targetTeamId === 'joker') {
+      setTeams(updatedTeams);
+      setJokerPlayerIds([...updatedJokerIds, playerId]);
+    } else {
+      setTeams(updatedTeams.map(t => 
+        t.id === targetTeamId ? { ...t, playerIds: [...t.playerIds, playerId] } : t
+      ));
+      setJokerPlayerIds(updatedJokerIds);
+    }
+  };
+
+  const handleDragEndInOverview = (playerId: string, x: number, y: number) => {
+    // Find source ID
+    const sourceTeam = teams.find(t => t.playerIds.includes(playerId));
+    const isJoker = jokerPlayerIds.includes(playerId);
+    const sourceId = sourceTeam ? sourceTeam.id : (isJoker ? 'joker' : null);
+
+    // elementsFromPoint is more robust
+    const elements = document.elementsFromPoint(x, y);
+    const teamElement = elements
+      .map(el => (el as HTMLElement).closest?.('[data-overview-team-id]'))
+      .find(te => te && te.getAttribute('data-overview-team-id') !== sourceId);
+
+    if (teamElement) {
+      const targetTeamId = teamElement.getAttribute('data-overview-team-id');
+      if (targetTeamId) {
+        movePlayerInternal(playerId, targetTeamId);
+      }
+    }
+    setDraggedPlayerId(null);
+  };
+
   const clearAllTeams = () => {
     setTeams(teams.map(t => ({ ...t, playerIds: [] })));
     setJokerPlayerIds([]);
@@ -277,7 +348,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
     onStartGame(
-      gameName || 'Ny övning', 
+      gameName || 'Nytt tävlingsmoment', 
       selectedIcon, 
       teams, 
       sortByScore, 
@@ -342,7 +413,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">Övningens namn</label>
+              <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">Tävlingsmomentets namn</label>
               <input
                 type="text"
                 value={gameName}
@@ -352,220 +423,271 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                <div className="flex flex-col">
-                  <span className="font-bold text-zinc-900 dark:text-white text-sm">Automatisk sortering av lag</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider leading-tight">SORTERING DIREKT UTIFRÅN POÄNG</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSortByScore(!sortByScore)}
-                  className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
-                    sortByScore ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-                  }`}
-                >
-                  <motion.div
-                    animate={{ x: sortByScore ? 22 : 2 }}
-                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                <div className="flex flex-col">
-                  <span className="font-bold text-zinc-900 dark:text-white text-sm">Timer</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Visa i övningen</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowTimer(!showTimer)}
-                  className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
-                    showTimer ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-                  }`}
-                >
-                  <motion.div
-                    animate={{ x: showTimer ? 22 : 2 }}
-                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
-                  />
-                </button>
-              </div>
-            </div>
-
-            <AnimatePresence>
-              {showTimer && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="space-y-4 overflow-hidden"
-                >
-                  <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                    {/* Linked Session Badge */}
+            {/* Linked Session Badge */}
             {(sessionAttendance || initialGame?.sessionId) && (
-              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-4 mb-8 flex items-center gap-4">
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-4 flex items-center gap-4">
                 <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0">
                   <Calendar size={20} />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">Kopplad till träningspass</h4>
-                  <p className="text-xs text-indigo-600/70 dark:text-indigo-400/70">Använder närvaro från pågående pass för lagindelning.</p>
+                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase">Kopplad till: {sessionTitle}</h4>
+                  <p className="text-xs text-indigo-600/70 dark:text-indigo-400/70 font-medium">Lagindelning och poäng synkas med träningen.</p>
                 </div>
               </div>
             )}
 
-            <div className="flex flex-col mb-4">
-                      <span className="font-bold text-zinc-900 dark:text-white text-sm">Standardtid</span>
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Tid per omgång</span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="flex flex-col items-center gap-2">
-                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Minuter</span>
-                        <div className="flex items-center gap-4">
-                          <button type="button" onClick={() => adjustDefaultTime('min', -1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                            <Minus size={18} />
-                          </button>
-                          <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultMinutes}</span>
-                          <button type="button" onClick={() => adjustDefaultTime('min', 1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                            <Plus size={18} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-center gap-2">
-                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Sekunder</span>
-                        <div className="flex items-center gap-4">
-                          <button type="button" onClick={() => adjustDefaultTime('sec', -10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                            <Minus size={18} />
-                          </button>
-                          <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultSeconds.toString().padStart(2, '0')}</span>
-                          <button type="button" onClick={() => adjustDefaultTime('sec', 10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                            <Plus size={18} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
+            <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+              <button 
+                type="button"
+                onClick={() => setShowTimerSettings(!showTimerSettings)}
+                className="w-full flex items-center justify-between"
               >
-                <Save size={18} />
-                <span>Spara inställningar</span>
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl ${showTimer ? 'bg-indigo-100 text-indigo-600' : 'bg-zinc-200 text-zinc-500'} dark:bg-zinc-800 transition-colors`}>
+                    <Clock size={20} />
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="font-bold text-zinc-900 dark:text-white text-sm">Timer-inställningar</span>
+                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">
+                      {showTimer ? `${defaultMinutes}:${defaultSeconds.toString().padStart(2, '0')} aktiv` : 'Inaktiverad'}
+                    </span>
+                  </div>
+                </div>
+                {showTimerSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
               </button>
-            </div>
-          </div>
 
+              <AnimatePresence>
+                {showTimerSettings && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-6"
+                  >
+                    <div className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Visa timer</span>
+                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">AKTIVERA I TÄVLINGSMOMENTET</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTimer(!showTimer)}
+                        className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
+                          showTimer ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
+                        }`}
+                      >
+                        <motion.div
+                          animate={{ x: showTimer ? 22 : 2 }}
+                          className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
 
-          <div>
-            <div className="p-6 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 mb-8">
-              <div className="flex flex-col mb-6">
-                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Poäng till poängligan</label>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Hur många poäng får 1:an, 2:an och 3:an?</span>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 flex items-center justify-center">
-                    <Trophy size={16} />
-                  </div>
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase">1:a</span>
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: Math.max(0, prev.first - 1) }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Minus size={14} />
-                    </button>
-                    <span className="text-xl font-black min-w-[1.5ch] text-center dark:text-white">{pointsConfig.first}</span>
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: prev.first + 1 }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center">
-                    <Medal size={16} />
-                  </div>
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase">2:a</span>
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: Math.max(0, prev.second - 1) }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Minus size={14} />
-                    </button>
-                    <span className="text-xl font-black min-w-[1.5ch] text-center dark:text-white">{pointsConfig.second}</span>
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: prev.second + 1 }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 flex items-center justify-center">
-                    <Medal size={16} />
-                  </div>
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase">3:e</span>
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: Math.max(0, prev.third - 1) }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Minus size={14} />
-                    </button>
-                    <span className="text-xl font-black min-w-[1.5ch] text-center dark:text-white">{pointsConfig.third}</span>
-                    <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: prev.third + 1 }))} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-              </div>
+                    {showTimer && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-zinc-900 dark:text-white text-xs">Standardtid</span>
+                          <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Tid per omgång</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col items-center gap-2">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Minuter</span>
+                            <div className="flex items-center gap-4">
+                              <button type="button" onClick={() => adjustDefaultTime('min', -1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                                <Minus size={18} />
+                              </button>
+                              <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultMinutes}</span>
+                              <button type="button" onClick={() => adjustDefaultTime('min', 1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                                <Plus size={18} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-center gap-2">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Sekunder</span>
+                            <div className="flex items-center gap-4">
+                              <button type="button" onClick={() => adjustDefaultTime('sec', -10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                                <Minus size={18} />
+                              </button>
+                              <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultSeconds.toString().padStart(2, '0')}</span>
+                              <button type="button" onClick={() => adjustDefaultTime('sec', 10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                                <Plus size={18} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex flex-col shrink-0">
-                  <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag</label>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Välj snabbt eller lägg till manuellt</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
-                  {[1, 2, 3, 4].map(num => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => setTeamCount(num)}
-                      className={`w-8 h-8 rounded-lg text-xs font-bold transition-all border ${
-                        teams.length === num 
-                          ? 'bg-indigo-600 border-indigo-600 text-white' 
-                          : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
-                      }`}
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <div className="flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 h-8">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Eget:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      placeholder="#"
-                      className="w-8 bg-transparent border-none focus:ring-0 outline-none text-xs font-bold text-zinc-900 dark:text-white p-0 text-center"
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (val > 0) setTeamCount(val);
-                      }}
-                    />
+              <button 
+                type="button"
+                onClick={() => setShowPointsSettings(!showPointsSettings)}
+                className="w-full flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-orange-100 text-orange-600 dark:bg-zinc-800">
+                    <Trophy size={20} />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setTeamCount(squad.length, true)}
-                    disabled={squad.length === 0}
-                    className="px-3 h-8 rounded-lg text-[10px] font-bold transition-all border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 uppercase disabled:opacity-50"
-                  >
-                    Ett lag per spelare
-                  </button>
+                  <div className="flex flex-col text-left">
+                    <span className="font-bold text-zinc-900 dark:text-white text-sm">Poäng & Sortering</span>
+                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">
+                      {pointsConfig.first}-{pointsConfig.second}-{pointsConfig.third} poäng • {sortByScore ? 'Auto-sortering' : 'Fast ordning'}
+                    </span>
+                  </div>
                 </div>
+                {showPointsSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+              </button>
+
+              <AnimatePresence>
+                {showPointsSettings && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-6"
+                  >
+                    <div className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                      <div className="flex flex-col text-left">
+                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Automatisk sortering</span>
+                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">SORTERA LAG DIREKT EFTER POÄNG</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSortByScore(!sortByScore)}
+                        className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
+                          sortByScore ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
+                        }`}
+                      >
+                        <motion.div
+                          animate={{ x: sortByScore ? 22 : 2 }}
+                          className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex flex-col text-left">
+                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Poängfördelning</span>
+                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">POÄNG TILL 1:AN, 2:AN OCH 3:AN</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                          <div className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 flex items-center justify-center">
+                            <Trophy size={16} />
+                          </div>
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase">1:a</span>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: Math.max(0, prev.first - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Minus size={12} />
+                            </button>
+                            <span className="text-lg font-black dark:text-white">{pointsConfig.first}</span>
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: prev.first + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Plus size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center">
+                            <Medal size={16} />
+                          </div>
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase">2:a</span>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: Math.max(0, prev.second - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Minus size={12} />
+                            </button>
+                            <span className="text-lg font-black dark:text-white">{pointsConfig.second}</span>
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: prev.second + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Plus size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                          <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 flex items-center justify-center">
+                            <Medal size={16} />
+                          </div>
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase">3:e</span>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: Math.max(0, prev.third - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Minus size={12} />
+                            </button>
+                            <span className="text-lg font-black dark:text-white">{pointsConfig.third}</span>
+                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: prev.third + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
+                              <Plus size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="submit"
+              form="game-setup-form"
+              className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
+            >
+              <Save size={18} />
+              <span>Spara inställningar</span>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex flex-col shrink-0">
+                <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag / Deltagar-läge</label>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Hur många lag ska delas in?</span>
+              </div>
+              <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
+                {[1, 2, 3, 4].map(num => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setTeamCount(num)}
+                    className={`w-9 h-9 rounded-xl text-xs font-bold transition-all border ${
+                      teams.length === num && !teams.every(t => t.playerIds.length === 1 && t.name === '') // Simple check for individual mode
+                        ? 'bg-indigo-600 border-indigo-600 text-white' 
+                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+                <div className="flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 h-9">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Eget:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    placeholder="#"
+                    className="w-8 bg-transparent border-none focus:ring-0 outline-none text-xs font-black text-zinc-900 dark:text-white p-0 text-center"
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (val > 0) setTeamCount(val);
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTeamCount(isAttendanceActive ? currentAttendanceIds.length : squad.length, true)}
+                  disabled={squad.length === 0}
+                  className="px-4 h-9 rounded-xl text-[10px] font-black transition-all border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 uppercase disabled:opacity-50 tracking-tight"
+                >
+                  {isAttendanceActive ? 'En per närvarande' : 'En per spelare'}
+                </button>
               </div>
             </div>
+          </div>
 
             <div className="space-y-4">
               {((sessionAttendance && sessionAttendance.length > 0) || (standaloneAttendance.length > 0)) && (
@@ -580,7 +702,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                     </div>
                     <div>
                       <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
-                        {sessionAttendance ? 'Använd närvaro från passet' : 'Fördela närvarande spelare'}
+                        {sessionAttendance ? 'Använd närvaro från träningspasset' : 'Fördela närvarande spelare'}
                       </span>
                       <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
                         {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
@@ -627,20 +749,24 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                       >
                         <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
                           <div className="flex flex-wrap gap-2">
-                            {squad.map(player => (
-                              <button
-                                key={player.id}
-                                type="button"
-                                onClick={() => toggleStandaloneAttendance(player.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                                  standaloneAttendance.includes(player.id)
-                                    ? 'bg-zinc-900 dark:bg-zinc-100 border-zinc-900 dark:border-zinc-100 text-white dark:text-zinc-900 shadow-sm'
-                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-gray-500 hover:border-indigo-300'
-                                }`}
-                              >
-                                {player.name}
-                              </button>
-                            ))}
+                            {sortPlayersByPosition(squad.map(p => p.id), squad).map(pid => {
+                              const player = squad.find(p => p.id === pid)!;
+                              return (
+                                <button
+                                  key={player.id}
+                                  type="button"
+                                  onClick={() => toggleStandaloneAttendance(player.id)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
+                                    standaloneAttendance.includes(player.id)
+                                      ? 'bg-zinc-900 dark:bg-zinc-100 border-zinc-900 dark:border-zinc-100 text-white dark:text-zinc-900 shadow-sm'
+                                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-gray-500 hover:border-indigo-300'
+                                  }`}
+                                >
+                                  {player.name}
+                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </motion.div>
@@ -737,10 +863,19 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                     className="overflow-hidden"
                   >
                     <div className="bg-indigo-50 dark:bg-indigo-950/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Välj jokrar</label>
+                        {isAttendanceActive && (
+                          <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
+                        )}
+                      </div>
                       {squad.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
-                          {squad.map(player => {
-                            const isJoker = jokerPlayerIds.includes(player.id);
+                          {sortPlayersByPosition(squad.map(p => p.id), squad)
+                            .filter(pid => isAttendanceActive ? currentAttendanceIds.includes(pid) : true)
+                            .map(pid => {
+                              const player = squad.find(p => p.id === pid)!;
+                              const isJoker = jokerPlayerIds.includes(player.id);
                             const isInAnyTeam = teams.some(t => t.playerIds.includes(player.id));
                             
                             return (
@@ -748,7 +883,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                 key={player.id}
                                 type="button"
                                 onClick={() => toggleJoker(player.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
                                   isJoker 
                                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' 
                                     : isInAnyTeam
@@ -759,6 +894,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                 disabled={isInAnyTeam}
                               >
                                 {player.name}
+                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
                               </button>
                             );
                           })}
@@ -803,7 +939,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                         <button
                           type="submit"
                           className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors p-2 shrink-0"
-                          title="Spara övning"
+                          title="Spara tävlingsmoment"
                         >
                           <Save size={20} />
                         </button>
@@ -819,20 +955,28 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Välj spelare från truppen</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Välj spelare från truppen</label>
+                        {isAttendanceActive && (
+                          <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
+                        )}
+                      </div>
                       {squad.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
-                          {squad.map(player => {
-                            const isSelected = team.playerIds.includes(player.id);
-                            const isJoker = jokerPlayerIds.includes(player.id);
-                            const isInOtherTeam = teams.some(t => t.id !== team.id && t.playerIds.includes(player.id));
-                            
-                            return (
-                              <button
+                          {sortPlayersByPosition(squad.map(p => p.id), squad)
+                            .filter(pid => isAttendanceActive ? currentAttendanceIds.includes(pid) : true)
+                            .map(pid => {
+                              const player = squad.find(p => p.id === pid)!;
+                              const isSelected = team.playerIds.includes(player.id);
+                              const isJoker = jokerPlayerIds.includes(player.id);
+                              const isInOtherTeam = teams.some(t => t.id !== team.id && t.playerIds.includes(player.id));
+                              
+                              return (
+                                <button
                                 key={player.id}
                                 type="button"
                                 onClick={() => togglePlayerInTeam(team.id, player.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
                                   isSelected 
                                     ? 'text-white shadow-md' 
                                     : (isInOtherTeam || isJoker)
@@ -843,6 +987,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                 disabled={isInOtherTeam || isJoker}
                               >
                                 {player.name}
+                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
                               </button>
                             );
                           })}
@@ -869,7 +1014,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
             ) : (
               <>
                 <Play fill="currentColor" size={24} />
-                Starta övningen
+                Starta tävlingsmomentet
               </>
             )}
           </button>
@@ -882,49 +1027,101 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {teams.filter(t => t.playerIds.length > 0).map((team, idx) => (
-                  <div key={team.id} className="bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
-                      <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
-                      <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
-                        {team.playerIds.length}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {team.playerIds.map(pid => {
-                        const player = squad.find(p => p.id === pid);
-                        return player ? (
-                          <div key={pid} className="px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: team.color }}>
-                            {player.name}
+                {teams.filter(t => t.playerIds.length > 0 || teams.length <= 4).map((team, idx) => {
+                  const isThisTeamDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
+                  return (
+                    <div 
+                      key={team.id} 
+                      data-overview-team-id={team.id}
+                      className={`bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-200 dark:border-indigo-800 bg-indigo-50/10' : 'border-zinc-100 dark:border-zinc-800'}`}
+                      style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
+                        <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
+                        <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
+                          {team.playerIds.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 min-h-[30px]">
+                        {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
+                          const player = squad.find(p => p.id === pid);
+                          return player ? (
+                            <motion.div 
+                              key={pid} 
+                              drag
+                              dragSnapToOrigin
+                              whileDrag={{ 
+                                zIndex: 9999, 
+                                scale: 1.1,
+                                pointerEvents: 'none'
+                              }}
+                              onDragStart={() => setDraggedPlayerId(pid)}
+                              onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                              className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
+                              style={{ backgroundColor: team.color }}
+                            >
+                              {player.name}
+                              {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                            </motion.div>
+                          ) : null;
+                        })}
+                        {team.playerIds.length === 0 && (
+                          <div className="w-full py-2 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest">
+                            Dra hit
                           </div>
-                        ) : null;
-                      })}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
-                {jokerPlayerIds.length > 0 && (
-                  <div className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border border-indigo-100 dark:border-indigo-900/30">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-3 h-3 rounded-full bg-indigo-600" />
-                      <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
-                      <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
-                        {jokerPlayerIds.length}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {jokerPlayerIds.map(pid => {
-                        const player = squad.find(p => p.id === pid);
-                        return player ? (
-                          <div key={pid} className="px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm">
-                            {player.name}
+                {(jokerPlayerIds.length > 0 || teams.length <= 4) && (() => {
+                  const isJokerDragging = draggedPlayerId && jokerPlayerIds.includes(draggedPlayerId);
+                  return (
+                    <div 
+                      data-overview-team-id="joker"
+                      className={`bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/30'}`}
+                      style={{ zIndex: isJokerDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-3 h-3 rounded-full bg-indigo-600" />
+                        <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
+                        <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
+                          {jokerPlayerIds.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 min-h-[30px]">
+                        {sortPlayersByPosition(jokerPlayerIds || [], squad).map(pid => {
+                          const player = squad.find(p => p.id === pid);
+                          return player ? (
+                            <motion.div 
+                              key={pid} 
+                              drag
+                              dragSnapToOrigin
+                              whileDrag={{ 
+                                zIndex: 9999, 
+                                scale: 1.1,
+                                pointerEvents: 'none'
+                              }}
+                              onDragStart={() => setDraggedPlayerId(pid)}
+                              onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                              className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
+                            >
+                              {player.name}
+                              {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                            </motion.div>
+                          ) : null;
+                        })}
+                        {jokerPlayerIds.length === 0 && (
+                          <div className="w-full py-2 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-indigo-400 uppercase tracking-widest">
+                            Dra hit
                           </div>
-                        ) : null;
-                      })}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
           )}

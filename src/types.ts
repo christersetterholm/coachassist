@@ -74,6 +74,9 @@ export interface SessionMoment {
   duration: number; // in minutes
   description?: string;
   exerciseId?: string; // Link to a standalone exercise if applicable
+  imageUrl?: string;
+  imageUrls?: string[];
+  externalLink?: string;
 }
 
 export interface TrainingSession {
@@ -84,6 +87,7 @@ export interface TrainingSession {
   endTime?: string; // Optional
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
+  isCompleted?: boolean;
   createdAt: number;
   updatedAt: number;
 }

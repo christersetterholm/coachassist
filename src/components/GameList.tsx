@@ -103,7 +103,7 @@ export default function GameList({
                   ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/30 dark:border-indigo-800' 
                   : 'bg-white border-zinc-200 text-zinc-600 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400'
               }`}
-              title={isReorderMode ? 'Avsluta sortering' : 'Sortera övningar'}
+              title={isReorderMode ? 'Avsluta sortering' : 'Sortera tävlingsmoment'}
             >
               <ArrowUpDown size={18} />
               <span className="hidden xs:inline">{isReorderMode ? 'Klar' : 'Sortera'}</span>
@@ -114,7 +114,7 @@ export default function GameList({
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
           >
             <Plus size={18} />
-            Ny övning
+            Nytt tävlingsmoment
           </button>
         </div>
       </div>
@@ -124,16 +124,16 @@ export default function GameList({
           <div className="w-12 h-12 sm:w-16 sm:h-16 bg-zinc-50 dark:bg-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-zinc-400">
             <Layout size={24} className="sm:size-8" />
           </div>
-          <h3 className="text-lg sm:text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">Inga övningar hittades</h3>
+          <h3 className="text-lg sm:text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">Inga tävlingsmoment hittades</h3>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 sm:mb-8">
-            {filter === 'all' ? 'Skapa din första övning för att börja samla poäng!' : 'Inga övningar matchar ditt filter.'}
+            {filter === 'all' ? 'Skapa ditt första tävlingsmoment för att börja samla poäng!' : 'Inga tävlingsmoment matchar ditt filter.'}
           </p>
           {filter === 'all' && (
             <button
               onClick={onNewExercise}
               className="bg-indigo-600 text-white px-6 py-2.5 sm:px-8 sm:py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all text-sm sm:text-base"
             >
-              Skapa övning
+              Skapa tävlingsmoment
             </button>
           )}
         </div>
@@ -186,7 +186,7 @@ export default function GameList({
                     <ExerciseIcon size={24} className="sm:size-7" fill="currentColor" />
                   </div>
                   {isLinked && (
-                    <div className="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white p-1 rounded-lg shadow-sm border-2 border-white dark:border-zinc-900" title="Kopplad till pass">
+                    <div className="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white p-1 rounded-lg shadow-sm border-2 border-white dark:border-zinc-900" title="Kopplad till träningspass">
                       <Link size={10} strokeWidth={3} />
                     </div>
                   )}
@@ -293,7 +293,7 @@ export default function GameList({
               className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Radera övning?</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Radera tävlingsmoment?</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-8">
                 Är du säker på att du vill radera "{exercises.find(e => e.id === exerciseToDelete)?.name}"? Detta kan inte ångras.
               </p>

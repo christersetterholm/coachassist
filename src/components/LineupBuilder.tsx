@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toPng } from 'html-to-image';
 import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
+import { CachedImage } from './CachedImage';
 import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Download, Maximize2, Minimize2, Copy, Gamepad2, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
@@ -85,6 +86,65 @@ export default function LineupBuilder({
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number, y: number }[]>([]);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastTapTime = useRef<number>(0);
+
+  const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'ball', id?: string) => {
+    e.stopPropagation();
+    
+    // Check for double tap
+    const now = Date.now();
+    if (now - lastTapTime.current < 300) {
+      if (type === 'opponent' && id) {
+        setOpponents(prev => prev.filter(o => o.id !== id));
+      } else if (type === 'ball') {
+        setFootballPos(null);
+      }
+      setHasUnsavedChanges(true);
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      return;
+    }
+    lastTapTime.current = now;
+
+    // Direct eraser check
+    if (tacticalTool === 'eraser') {
+      if (type === 'opponent' && id) {
+        setOpponents(prev => prev.filter(o => o.id !== id));
+      } else if (type === 'ball') {
+        setFootballPos(null);
+      }
+      setHasUnsavedChanges(true);
+      return;
+    }
+
+    // Long press detection
+    longPressTimer.current = setTimeout(() => {
+      if (type === 'opponent' && id) {
+        setOpponents(prev => prev.filter(o => o.id !== id));
+      } else if (type === 'ball') {
+        setFootballPos(null);
+      }
+      setHasUnsavedChanges(true);
+      // Vibrate if supported
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }, 600);
+
+    // Continue with normal dragging
+    if (type === 'ball') {
+      setDraggingBall(true);
+    } else if (type === 'opponent' && id) {
+      setDraggingOpponentId(id);
+    }
+  };
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
   const [draggingBall, setDraggingBall] = useState(false);
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
@@ -93,6 +153,7 @@ export default function LineupBuilder({
   const [showFormationModal, setShowFormationModal] = useState(false);
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const fieldRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +183,11 @@ export default function LineupBuilder({
       }));
       // Also remove opponents if clicked near
       setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 5));
+      // Remove football if clicked near
+      if (footballPos && Math.hypot(footballPos.x - x, footballPos.y - y) < 5) {
+        setFootballPos(null);
+      }
+      setHasUnsavedChanges(true);
       return;
     }
 
@@ -165,22 +231,29 @@ export default function LineupBuilder({
           lineType: tacticalLineType,
           lineWidth: tacticalLineWidth
         }]);
+        setHasUnsavedChanges(true);
       }
       setIsDrawing(false);
       setCurrentPath([]);
     }
+    if (draggingBall || draggingOpponentId) {
+      setHasUnsavedChanges(true);
+    }
+    clearLongPress();
     setDraggingBall(false);
     setDraggingOpponentId(null);
   };
 
   const undoTactical = () => {
     setTacticalDrawings(prev => prev.slice(0, -1));
+    setHasUnsavedChanges(true);
   };
 
   const clearTactical = () => {
     setTacticalDrawings([]);
     setFootballPos(null);
     setOpponents([]);
+    setHasUnsavedChanges(true);
   };
 
   const handleExport = useCallback(async () => {
@@ -253,6 +326,7 @@ export default function LineupBuilder({
             p.id === draggingId ? { ...p, isSubstitute: true } : p
           ));
         }
+        setHasUnsavedChanges(true);
       }
       setDraggingId(null);
       setDragPos(null);
@@ -350,6 +424,9 @@ export default function LineupBuilder({
         if (prev !== remote) return remote;
         return prev;
       });
+
+      // Crucially, reset the unsaved changes flag when new remote data is applied
+      setHasUnsavedChanges(false);
     } else {
       setLineupName('');
       setTeamName('');
@@ -421,13 +498,14 @@ export default function LineupBuilder({
       JSON.stringify(lineup.players) !== JSON.stringify(players) ||
       JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard);
 
-    if (!isDifferent) return;
+    if (!isDifferent || !hasUnsavedChanges) return;
 
     const timeout = setTimeout(() => {
       onUpdateLineup({
         ...currentState,
         date: Date.now() // Set new date only when actually pushing changes
       });
+      setHasUnsavedChanges(false);
     }, 300); // Debounce for 300ms
     
     return () => clearTimeout(timeout);
@@ -436,7 +514,7 @@ export default function LineupBuilder({
   const applyFormation = (variant: FormationVariant) => {
     setCurrentFormation(variant.name);
 
-    const onField = players.filter(p => !p.isSubstitute);
+    const onField = starters;
     if (onField.length === 0) return;
 
     // Identify Goalkeeper: The specific player with the highest Y (closest to bottom)
@@ -477,12 +555,13 @@ export default function LineupBuilder({
 
     setPlayers(newPlayers);
     setShowFormationModal(false);
+    setHasUnsavedChanges(true);
   };
 
   const handleSaveCurrentAsFormation = () => {
     if (!newFormationName.trim() || !onSaveCustomFormation) return;
 
-    const onField = players.filter(p => !p.isSubstitute);
+    const onField = starters;
     if (onField.length !== 11) {
       alert("Du måste ha exakt 11 spelare på planen för att spara en formation.");
       return;
@@ -514,6 +593,7 @@ export default function LineupBuilder({
     setNewFormationName('');
     setShowSaveFormation(false);
     setCurrentFormation(newFormation.name);
+    setHasUnsavedChanges(true);
   };
 
   const handleSave = () => {
@@ -567,6 +647,7 @@ export default function LineupBuilder({
       setTeamLogoUrl(croppedDataUrl);
       setShowLogoPicker(false);
       setLogoToCrop(null);
+      setHasUnsavedChanges(true);
       // Reset input value so same file can be uploaded again
       if (logoInputRef.current) logoInputRef.current.value = '';
     } catch (e) {
@@ -610,6 +691,7 @@ export default function LineupBuilder({
       };
       setPlayers(prev => [...prev, newPlayer]);
     }
+    setHasUnsavedChanges(true);
   };
 
   const updatePlayerPosition = (id: string, x: number, y: number) => {
@@ -619,21 +701,25 @@ export default function LineupBuilder({
       }
       return p;
     }));
+    setHasUnsavedChanges(true);
   };
 
   const toggleSubstitute = (id: string) => {
     setPlayers(prev => prev.map(p => 
       p.id === id ? { ...p, isSubstitute: !p.isSubstitute } : p
     ));
+    setHasUnsavedChanges(true);
   };
 
   const removePlayer = (id: string) => {
     setPlayers(prev => prev.filter(p => p.id !== id));
     setSelectedForEdit(null);
+    setHasUnsavedChanges(true);
   };
 
   const updateSquadPlayerInfo = (playerId: string, updates: Partial<SquadPlayer>) => {
     onUpdateSquad(squad.map(p => p.id === playerId ? { ...p, ...updates } : p));
+    setHasUnsavedChanges(true);
   };
 
   const getVisibleName = (fullName: string) => {
@@ -644,9 +730,19 @@ export default function LineupBuilder({
   };
 
   const getSquadPlayer = (id: string) => squad.find(s => s.id === id);
+  
+  const validLineupPlayers = useMemo(() => {
+    const uniquePlayerIds = new Set<string>();
+    return players.filter(p => {
+      if (!squad.some(s => s.id === p.playerId)) return false;
+      if (uniquePlayerIds.has(p.playerId)) return false;
+      uniquePlayerIds.add(p.playerId);
+      return true;
+    });
+  }, [players, squad]);
 
-  const starters = players.filter(p => !p.isSubstitute);
-  const subs = players.filter(p => p.isSubstitute);
+  const starters = useMemo(() => validLineupPlayers.filter(p => !p.isSubstitute), [validLineupPlayers]);
+  const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
 
   return (
     <div className={`mx-auto transition-all duration-500 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
@@ -821,9 +917,9 @@ export default function LineupBuilder({
                 className="w-12 h-12 rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm hover:border-indigo-400 transition-all active:scale-95 group/logo relative"
               >
                 {teamLogoUrl ? (
-                  <img src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <CachedImage src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : user?.photoURL ? (
-                  <img src={user.photoURL} alt="User Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <CachedImage src={user.photoURL} alt="User Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20">
                     <ImageIcon size={20} />
@@ -951,9 +1047,18 @@ export default function LineupBuilder({
             <div 
               key={opp.id}
               className={`absolute z-40 transition-none cursor-move select-none`}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                setDraggingOpponentId(opp.id);
+              onPointerDown={(e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
+              onPointerUp={clearLongPress}
+              onPointerCancel={clearLongPress}
+              onPointerMove={(e) => {
+                if (draggingOpponentId === opp.id) {
+                  clearLongPress();
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setOpponents(prev => prev.filter(o => o.id !== opp.id));
+                setHasUnsavedChanges(true);
               }}
               style={{
                 left: `${opp.x}%`,
@@ -972,7 +1077,20 @@ export default function LineupBuilder({
           {/* Football Icon */}
           {isMaximized && footballPos && (
             <div 
-              className={`absolute z-50 transition-none pointer-events-none select-none`}
+              className={`absolute z-50 transition-none cursor-move select-none`}
+              onPointerDown={(e) => handlePointerDownWithDeletion(e, 'ball')}
+              onPointerUp={clearLongPress}
+              onPointerCancel={clearLongPress}
+              onPointerMove={(e) => {
+                if (draggingBall) {
+                  clearLongPress();
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setFootballPos(null);
+                setHasUnsavedChanges(true);
+              }}
               style={{
                 left: `${footballPos.x}%`,
                 top: `${footballPos.y}%`,
@@ -1037,7 +1155,7 @@ export default function LineupBuilder({
 
           {/* Draggable Players on Field and Bench */}
           <AnimatePresence>
-            {players.map((p) => {
+            {validLineupPlayers.map((p) => {
               const sp = getSquadPlayer(p.playerId);
               if (!sp) return null;
               
@@ -1090,7 +1208,13 @@ export default function LineupBuilder({
                         }}
                       >
                         {sp.photoUrl ? (
-                          <img src={sp.photoUrl} alt={sp.name} className="w-full h-full object-cover pointer-events-none" />
+                          <CachedImage 
+                            src={sp.photoUrl} 
+                            alt={sp.name} 
+                            className="w-full h-full object-cover pointer-events-none" 
+                            loading="lazy"
+                            decoding="async"
+                          />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
                             <User size={24 * playerScale} />
@@ -1204,7 +1328,13 @@ export default function LineupBuilder({
                           }}
                         >
                           {sp.photoUrl ? (
-                            <img src={sp.photoUrl} alt={sp.name} className="w-full h-full object-cover" />
+                            <CachedImage 
+                              src={sp.photoUrl} 
+                              alt={sp.name} 
+                              className="w-full h-full object-cover" 
+                              loading="lazy"
+                              decoding="async"
+                            />
                           ) : (
                             <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
                               <User size={subs.length <= 6 ? 18 : 22} className="sm:hidden" />
@@ -1244,7 +1374,24 @@ export default function LineupBuilder({
         </div>
 
         {!isMaximized && !isExporting && (
-          <div className="flex flex-wrap justify-center items-center gap-3 mt-6">
+          <div className="flex flex-col items-center gap-6 mt-6">
+            {/* Player Count Overview - Moved here as requested */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-2xl border border-indigo-100/50 dark:border-indigo-800/50">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
+                <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">
+                  {starters.length} <span className="opacity-60 ml-0.5">på planen</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-2xl border border-zinc-200 dark:border-zinc-700">
+                <div className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
+                  {subs.length} <span className="opacity-60 ml-0.5">på bänken</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap justify-center items-center gap-3">
             {/* Primary Action Group: Adding Players */}
             <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
               <button
@@ -1307,7 +1454,8 @@ export default function LineupBuilder({
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
       </div>
 
       {/* Global Controls & Functions - Reorganized at the bottom (Hidden in fullscreen) */}
@@ -1416,7 +1564,10 @@ export default function LineupBuilder({
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tema</span>
                 <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                   <button
-                    onClick={() => setNameTagStyle('light')}
+                    onClick={() => {
+                      setNameTagStyle('light');
+                      setHasUnsavedChanges(true);
+                    }}
                     className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
                       nameTagStyle === 'light'
                         ? 'bg-indigo-600 text-white shadow-lg'
@@ -1426,7 +1577,10 @@ export default function LineupBuilder({
                     Ljus
                   </button>
                   <button
-                    onClick={() => setNameTagStyle('dark')}
+                    onClick={() => {
+                      setNameTagStyle('dark');
+                      setHasUnsavedChanges(true);
+                    }}
                     className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
                       nameTagStyle === 'dark'
                         ? 'bg-indigo-600 text-white shadow-lg'
@@ -1442,7 +1596,10 @@ export default function LineupBuilder({
               <div className="flex flex-col gap-2">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Foto</span>
                 <button
-                  onClick={() => setShowPhoto(!showPhoto)}
+                  onClick={() => {
+                    setShowPhoto(!showPhoto);
+                    setHasUnsavedChanges(true);
+                  }}
                   className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
                     showPhoto
                       ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
@@ -1458,7 +1615,10 @@ export default function LineupBuilder({
               <div className="flex flex-col gap-2">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Nr</span>
                 <button
-                  onClick={() => setShowNumber(!showNumber)}
+                  onClick={() => {
+                    setShowNumber(!showNumber);
+                    setHasUnsavedChanges(true);
+                  }}
                   className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
                     showNumber
                       ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
@@ -1476,9 +1636,18 @@ export default function LineupBuilder({
               <div className="flex flex-col gap-2">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnformat</span>
                 <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button onClick={() => setNameDisplayMode('first')} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>För</button>
-                  <button onClick={() => setNameDisplayMode('last')} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Efter</button>
-                  <button onClick={() => setNameDisplayMode('full')} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Hela</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('first');
+                    setHasUnsavedChanges(true);
+                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>För</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('last');
+                    setHasUnsavedChanges(true);
+                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Efter</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('full');
+                    setHasUnsavedChanges(true);
+                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Hela</button>
                 </div>
               </div>
 
@@ -1489,18 +1658,22 @@ export default function LineupBuilder({
                   <button onClick={() => {
                     setNameBackgroundType('badge');
                     setShowNameBackground(true);
+                    setHasUnsavedChanges(true);
                   }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'badge' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Badge</button>
                   <button onClick={() => {
                     setNameBackgroundType('transparent');
                     setShowNameBackground(true);
+                    setHasUnsavedChanges(true);
                   }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'transparent' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Genomskinlig</button>
                   <button onClick={() => {
                     setNameBackgroundType('solid');
                     setShowNameBackground(true);
+                    setHasUnsavedChanges(true);
                   }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'solid' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Bakgrund</button>
                   <button onClick={() => {
                     setNameBackgroundType('none');
                     setShowNameBackground(false);
+                    setHasUnsavedChanges(true);
                   }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(!showNameBackground || nameBackgroundType === 'none') ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ingen</button>
                 </div>
               </div>
@@ -1508,12 +1681,30 @@ export default function LineupBuilder({
               <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Planens utseende</span>
                 <div className="grid grid-cols-2 xs:grid-cols-3 gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button onClick={() => setPitchType('classic')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ränder</button>
-                  <button onClick={() => setPitchType('blue-stripes')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Ränder</button>
-                  <button onClick={() => setPitchType('grass')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Gräs</button>
-                  <button onClick={() => setPitchType('blue-grass')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Gräs</button>
-                  <button onClick={() => setPitchType('blue')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Mix Blå</button>
-                  <button onClick={() => setPitchType('solid-blue')} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Blå</button>
+                  <button onClick={() => {
+                    setPitchType('classic');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ränder</button>
+                  <button onClick={() => {
+                    setPitchType('blue-stripes');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Ränder</button>
+                  <button onClick={() => {
+                    setPitchType('grass');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Gräs</button>
+                  <button onClick={() => {
+                    setPitchType('blue-grass');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Gräs</button>
+                  <button onClick={() => {
+                    setPitchType('blue');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Mix Blå</button>
+                  <button onClick={() => {
+                    setPitchType('solid-blue');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Blå</button>
                 </div>
               </div>
             </div>
@@ -1529,7 +1720,10 @@ export default function LineupBuilder({
                 max="1.5" 
                 step="0.05" 
                 value={playerScale}
-                onChange={(e) => setPlayerScale(parseFloat(e.target.value))}
+                onChange={(e) => {
+                  setPlayerScale(parseFloat(e.target.value));
+                  setHasUnsavedChanges(true);
+                }}
                 className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
               />
             </div>
@@ -1751,6 +1945,7 @@ export default function LineupBuilder({
                   onClick={() => {
                     setLineupName(tempTitle);
                     setTeamName(tempTeamName);
+                    setHasUnsavedChanges(true);
                     handleSave();
                   }}
                   className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
@@ -2011,9 +2206,16 @@ export default function LineupBuilder({
                   <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
                     {pickerMode === 'starter' ? 'Välj startelva' : 'Välj bänk'}
                   </h3>
-                  <p className="text-xs text-zinc-500 mt-1 uppercase font-bold tracking-tighter">
-                    {players.length} spelare totalt i matchtruppen
-                  </p>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest leading-none flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                      {starters.length} på planen
+                    </span>
+                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest leading-none flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                      {subs.length} på bänken
+                    </span>
+                  </div>
                 </div>
                 <button onClick={() => setPickerMode(null)} className="text-zinc-400 hover:text-zinc-600">
                   <X size={24} />
@@ -2044,7 +2246,13 @@ export default function LineupBuilder({
                       <div className="relative">
                         <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'grayscale opacity-50' : ''}`}>
                           {sp.photoUrl ? (
-                            <img src={sp.photoUrl} alt={sp.name} className="w-full h-full object-cover" />
+                            <CachedImage 
+                              src={sp.photoUrl} 
+                              alt={sp.name} 
+                              className="w-full h-full object-cover" 
+                              loading="lazy"
+                              decoding="async"
+                            />
                           ) : (
                             <User size={20} />
                           )}
@@ -2129,7 +2337,13 @@ export default function LineupBuilder({
                       <div className="relative group">
                         <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center overflow-hidden border-2 border-zinc-100 dark:border-zinc-800">
                           {sp.photoUrl ? (
-                            <img src={sp.photoUrl} alt={sp.name} className="w-full h-full object-cover" />
+                            <CachedImage 
+                              src={sp.photoUrl} 
+                              alt={sp.name} 
+                              className="w-full h-full object-cover" 
+                              loading="lazy"
+                              decoding="async"
+                            />
                           ) : (
                             <User size={32} className="text-zinc-400" />
                           )}
