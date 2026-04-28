@@ -501,7 +501,7 @@ export default function App() {
     setData(prev => ({
       ...prev,
       exercises: prev.exercises.map(e => {
-        if (e.id !== activeExerciseId) return e;
+        if (e.id !== prev.activeExerciseId) return e;
         
         const updatedTeams = teams.map(t => {
           const existingTeam = e.teams.find(et => et.id === t.id);
@@ -530,7 +530,7 @@ export default function App() {
       }),
       sessions: linkToMomentId && activeSessionId 
         ? prev.sessions.map(s => s.id === activeSessionId 
-            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: activeExerciseId } : m), updatedAt: Date.now() } 
+            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: (prev.activeExerciseId || '') } : m), updatedAt: Date.now() } 
             : s)
         : prev.sessions
     }));
@@ -1354,7 +1354,6 @@ export default function App() {
                   onEditExercise={(id) => {
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setIsEditingActiveExercise(true);
-                    setView('setup');
                   }}
                   onReorderExercises={(reordered) => {
                     setData(prev => ({ ...prev, exercises: reordered }));
@@ -1381,6 +1380,7 @@ export default function App() {
               onStartGame={isEditingActiveExercise ? handleSaveEditedExercise : handleStartExercise} 
               squad={squad} 
               sessionAttendance={activeSessionId ? sessions.find(s => s.id === activeSessionId)?.attendance : undefined}
+              activeSessionId={activeSessionId}
               sessions={sessions}
               currentPeriodId={currentPeriodId}
               initialGame={isEditingActiveExercise 
@@ -1828,9 +1828,9 @@ export default function App() {
             onEditExercise={(id) => {
               setData(prev => ({ ...prev, activeExerciseId: id }));
               setIsEditingActiveExercise(true);
-              setView('setup');
               setSessionActionCount(prev => prev + 1);
             }}
+            onDeleteExercise={deleteExercise}
           />
         )}
       </AnimatePresence>
@@ -1950,6 +1950,9 @@ export default function App() {
                 onStartGame={handleSaveEditedExercise}
                 onCancel={() => setIsEditingActiveExercise(false)}
                 squad={squad}
+                sessions={sessions}
+                sessionAttendance={activeSessionId ? sessions.find(s => s.id === activeSessionId)?.attendance : undefined}
+                activeSessionId={activeSessionId}
                 currentPeriodId={currentPeriodId}
               />
             </div>

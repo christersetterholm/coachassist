@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Plus, Trophy, Clock, Trash2, Edit2, Copy, Check, ChevronRight, LayoutList, Dribbble, History, MoreVertical, ListTodo, GripVertical, Users, Play } from 'lucide-react';
+import { Calendar, Plus, Trophy, Clock, Trash2, Edit2, Copy, Check, ChevronRight, LayoutList, Dribbble, History, MoreVertical, ListTodo, GripVertical, Users, Play, FileText } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { Exercise, TrainingSession } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
@@ -78,6 +78,12 @@ function SessionItem({
                   <Clock size={14} className="text-zinc-400" />
                   {session.startTime} ({totalMinutes} min)
                 </span>
+                {session.notes && (
+                  <span className="flex items-center gap-1 text-amber-500">
+                    <FileText size={14} />
+                    Anteckningar
+                  </span>
+                )}
               </div>
             </div>
             <ChevronRight size={20} className="text-zinc-300 group-hover:text-indigo-600 transition-colors shrink-0" />

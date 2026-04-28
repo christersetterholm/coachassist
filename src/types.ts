@@ -88,6 +88,7 @@ export interface TrainingSession {
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   isCompleted?: boolean;
+  notes?: string;
   createdAt: number;
   updatedAt: number;
 }

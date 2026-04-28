@@ -1,13 +1,9 @@
 import React, { useState } from 'react';
-import { Plus, Minus, Trash2, Play, UserPlus, Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock } from 'lucide-react';
+import { Plus, Minus, Trash2, Play, UserPlus, Trophy, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, PRESET_COLORS, GAME_ICONS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
-
-const ICON_MAP: Record<string, any> = {
-  Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee
-};
 
 interface GameSetupProps {
   onStartGame: (
@@ -27,6 +23,7 @@ interface GameSetupProps {
   onCancel?: () => void;
   squad: SquadPlayer[];
   sessionAttendance?: string[];
+  activeSessionId?: string | null;
   sessions?: TrainingSession[];
   currentPeriodId: string | null;
   key?: React.Key;
@@ -40,10 +37,9 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, sessions, currentPeriodId }: GameSetupProps) {
+export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, activeSessionId, sessions, currentPeriodId }: GameSetupProps) {
   const [gameName, setGameName] = useState(initialGame?.name || '');
-  const [selectedIcon, setSelectedIcon] = useState(initialGame?.icon || 'Dribbble');
-  const [showAllIcons, setShowAllIcons] = useState(false);
+  const [selectedIcon] = useState(initialGame?.icon || 'Trophy');
   const [sortByScore, setSortByScore] = useState(initialGame?.sortByScore ?? false);
   const [showTimer, setShowTimer] = useState(initialGame?.showTimer ?? true);
   const [defaultMinutes, setDefaultMinutes] = useState(initialGame?.defaultTimerMinutes ?? 4);
@@ -62,8 +58,11 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
   
   // Find linked session if any
-  const linkedSession = sessions?.find(s => s.id === (initialGame?.sessionId || 'active') || s.attendance === sessionAttendance);
-  const sessionTitle = linkedSession?.title || 'pågående träningspass';
+  const linkedSession = sessions?.find(s => 
+    (initialGame?.sessionId && s.id === initialGame.sessionId) || 
+    (activeSessionId && s.id === activeSessionId)
+  );
+  const sessionTitle = linkedSession?.title || 'Träningspass';
   
   // Derived helper to identify currently attending players (either from session or standalone)
   const currentAttendanceIds = sessionAttendance || standaloneAttendance;
@@ -329,7 +328,10 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     const elements = document.elementsFromPoint(x, y);
     const teamElement = elements
       .map(el => (el as HTMLElement).closest?.('[data-overview-team-id]'))
-      .find(te => te && te.getAttribute('data-overview-team-id') !== sourceId);
+      .find(te => {
+        const id = te?.getAttribute('data-overview-team-id');
+        return id && id !== sourceId;
+      });
 
     if (teamElement) {
       const targetTeamId = teamElement.getAttribute('data-overview-team-id');
@@ -369,69 +371,42 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
       className="max-w-3xl mx-auto p-4 sm:p-6"
     >
       <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-xl p-6 sm:p-8 border border-zinc-100 dark:border-zinc-800 transition-colors duration-300 pb-32">
-        <form id="game-setup-form" onSubmit={handleStart} className="space-y-8">
-          <div className="space-y-6">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Välj ikon</label>
-                <button 
-                  type="button"
-                  onClick={() => setShowAllIcons(!showAllIcons)}
-                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:underline"
-                >
-                  {showAllIcons ? 'Visa färre' : 'Visa alla'}
-                </button>
-              </div>
-              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-                {GAME_ICONS.filter(icon => showAllIcons || icon === selectedIcon).map((iconName) => {
-                  const Icon = ICON_MAP[iconName];
-                  return (
-                    <button
-                      key={iconName}
-                      type="button"
-                      onClick={() => setSelectedIcon(iconName)}
-                      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
-                        selectedIcon === iconName 
-                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none scale-110' 
-                          : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      <Icon size={20} />
-                    </button>
-                  );
-                })}
-                {!showAllIcons && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllIcons(true)}
-                    className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-50 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
-                  >
-                    <Plus size={20} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">Tävlingsmomentets namn</label>
-              <input
-                type="text"
-                value={gameName}
-                onChange={(e) => setGameName(e.target.value)}
-                placeholder="T.ex. Smålagsspel, Avslut eller Teknikbana"
-                className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-lg font-bold"
-              />
-            </div>
-
-            {/* Linked Session Badge */}
-            {(sessionAttendance || initialGame?.sessionId) && (
-              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-4 flex items-center gap-4">
-                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0">
-                  <Calendar size={20} />
+        <form id="game-setup-form" onSubmit={handleStart} className="space-y-6">
+          <div className="space-y-4">
+            {/* Header: Name and Top Save */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <input
+                  type="text"
+                  value={gameName}
+                  onChange={(e) => setGameName(e.target.value)}
+                  placeholder="Tävlingens namn..."
+                  className="w-full bg-transparent border-none focus:ring-0 text-xl sm:text-2xl font-black text-zinc-900 dark:text-white placeholder:text-zinc-200 p-0 outline-none truncate"
+                />
+                <div className="flex items-center gap-1 mt-0.5">
+                  <Trophy size={10} className="text-zinc-400" />
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Tävlingsmoment</span>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase">Kopplad till: {sessionTitle}</h4>
-                  <p className="text-xs text-indigo-600/70 dark:text-indigo-400/70 font-medium">Lagindelning och poäng synkas med träningen.</p>
+              </div>
+
+              <button
+                type="submit"
+                form="game-setup-form"
+                className="w-7 h-7 flex items-center justify-center bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:scale-95 transition-all shadow-sm shrink-0"
+                title="Spara ändringar"
+              >
+                <Save size={14} />
+              </button>
+            </div>
+
+            {/* Linked Session Badge - Compact */}
+            {(sessionAttendance || initialGame?.sessionId) && (
+              <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100/50 dark:border-indigo-900/30 rounded-xl px-3 py-2 flex items-center gap-3">
+                <Calendar size={14} className="text-indigo-600 dark:text-indigo-400" />
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">
+                    Kopplad till: {sessionTitle}
+                  </span>
                 </div>
               </div>
             )}
@@ -628,18 +603,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                 )}
               </AnimatePresence>
             </div>
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="submit"
-              form="game-setup-form"
-              className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
-            >
-              <Save size={18} />
-              <span>Spara inställningar</span>
-            </button>
           </div>
-        </div>
 
         <div>
           <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 mb-8">
@@ -690,29 +654,6 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
           </div>
 
             <div className="space-y-4">
-              {((sessionAttendance && sessionAttendance.length > 0) || (standaloneAttendance.length > 0)) && (
-                <button
-                  type="button"
-                  onClick={generateTeamsFromSessionAttendance}
-                  className="w-full flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/20 group"
-                >
-                  <div className="flex items-center gap-3 text-left">
-                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-200 dark:shadow-none group-hover:scale-110 transition-transform">
-                      <Users size={20} />
-                    </div>
-                    <div>
-                      <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
-                        {sessionAttendance ? 'Använd närvaro från träningspasset' : 'Fördela närvarande spelare'}
-                      </span>
-                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
-                        {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
-                      </span>
-                    </div>
-                  </div>
-                  <Wand2 size={20} className="text-indigo-600 dark:text-indigo-400" />
-                </button>
-              )}
-
               {!sessionAttendance && (
                 <div className="space-y-2">
                   <button
@@ -773,6 +714,29 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                     )}
                   </AnimatePresence>
                 </div>
+              )}
+
+              {((sessionAttendance && sessionAttendance.length > 0) || (standaloneAttendance.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={generateTeamsFromSessionAttendance}
+                  className="w-full flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/20 group"
+                >
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-200 dark:shadow-none group-hover:scale-110 transition-transform">
+                      <Users size={20} />
+                    </div>
+                    <div>
+                      <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
+                        {sessionAttendance ? 'Använd närvaro från träningspasset' : 'Fördela närvarande spelare'}
+                      </span>
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
+                        {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
+                      </span>
+                    </div>
+                  </div>
+                  <Wand2 size={20} className="text-indigo-600 dark:text-indigo-400" />
+                </button>
               )}
 
               <button
@@ -838,6 +802,114 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                 </button>
               )}
             </div>
+
+            {(teams.some(t => t.playerIds.length > 0) || jokerPlayerIds.length > 0) && (
+              <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl p-6 border border-zinc-100 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <LayoutList size={18} className="text-zinc-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lagöversikt</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {teams.map((team, idx) => {
+                    const isThisTeamDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
+                    return (
+                      <div 
+                        key={team.id} 
+                        data-overview-team-id={team.id}
+                        className={`bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-200 dark:border-indigo-800 bg-indigo-50/10' : 'border-zinc-100 dark:border-zinc-800'}`}
+                        style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
+                          <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
+                          <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
+                            {team.playerIds.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
+                          {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
+                            const player = squad.find(p => p.id === pid);
+                            return player ? (
+                              <motion.div 
+                                key={pid} 
+                                drag
+                                dragSnapToOrigin
+                                whileDrag={{ 
+                                  zIndex: 9999, 
+                                  scale: 1.1,
+                                  pointerEvents: 'none'
+                                }}
+                                onDragStart={() => setDraggedPlayerId(pid)}
+                                onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                                className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
+                                style={{ backgroundColor: team.color }}
+                              >
+                                {player.name}
+                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                              </motion.div>
+                            ) : null;
+                          })}
+                          {team.playerIds.length === 0 && (
+                            <div className="w-full py-2 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-none">
+                              Dra hit
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {(() => {
+                    const isJokerDragging = draggedPlayerId && jokerPlayerIds.includes(draggedPlayerId);
+                    return (
+                      <div 
+                        key="joker-overview"
+                        data-overview-team-id="joker"
+                        className={`bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/30'}`}
+                        style={{ zIndex: isJokerDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-3 h-3 rounded-full bg-indigo-600" />
+                          <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
+                          <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
+                            {jokerPlayerIds.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
+                          {sortPlayersByPosition(jokerPlayerIds || [], squad).map(pid => {
+                            const player = squad.find(p => p.id === pid);
+                            return player ? (
+                              <motion.div 
+                                key={pid} 
+                                drag
+                                dragSnapToOrigin
+                                whileDrag={{ 
+                                  zIndex: 9999, 
+                                  scale: 1.1,
+                                  pointerEvents: 'none'
+                                }}
+                                onDragStart={() => setDraggedPlayerId(pid)}
+                                onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                                className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
+                              >
+                                {player.name}
+                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                              </motion.div>
+                            ) : null;
+                          })}
+                          {jokerPlayerIds.length === 0 && (
+                            <div className="w-full py-2 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-indigo-400 uppercase tracking-widest pointer-events-none">
+                              Dra hit
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <button
@@ -919,38 +991,50 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                     exit={{ opacity: 0, scale: 0.9 }}
                     className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800"
                   >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-white dark:bg-zinc-900 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm shrink-0 overflow-visible">
-                          <ColorPicker 
-                            selectedColor={team.color} 
-                            onChange={(color) => updateTeam(team.id, { color })} 
+                    <div className="flex flex-col gap-4 mb-6">
+                      {/* Topp-rad: Namn och knappar */}
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <input
+                            type="text"
+                            value={team.name}
+                            onChange={(e) => updateTeam(team.id, { name: e.target.value })}
+                            placeholder={`Lag ${index + 1}`}
+                            className="bg-transparent border-none focus:ring-0 text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tight p-0 placeholder:text-zinc-300 w-full"
                           />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest leading-none mb-1">Lag {index + 1}</span>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 mt-0.5">
                             <Users size={12} className="text-zinc-400" />
-                            <span className="text-xs font-bold text-zinc-900 dark:text-white">{team.playerIds.length} spelare</span>
+                            <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{team.playerIds.length} spelare</span>
                           </div>
                         </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="submit"
+                            className="bg-indigo-600 text-white p-2 rounded-xl transition-all active:scale-95 hover:bg-indigo-700 shadow-sm"
+                            title="Spara hela tävlingen"
+                          >
+                            <Save size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeTeam(team.id)}
+                            disabled={teams.length <= 1}
+                            className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 hover:text-red-500 p-2 rounded-xl transition-all active:scale-95 disabled:opacity-0"
+                            title="Ta bort lag"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="submit"
-                          className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors p-2 shrink-0"
-                          title="Spara tävlingsmoment"
-                        >
-                          <Save size={20} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeTeam(team.id)}
-                          disabled={teams.length <= 1}
-                          className="text-zinc-400 dark:text-zinc-600 hover:text-red-500 disabled:opacity-0 transition-colors p-2 shrink-0"
-                        >
-                          <Trash2 size={20} />
-                        </button>
+
+                      {/* Rad 2: Färgval */}
+                      <div className="flex items-center gap-3 bg-white dark:bg-zinc-900 p-2.5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm w-fit">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-1">Väst:</span>
+                        <ColorPicker 
+                          selectedColor={team.color} 
+                          onChange={(color) => updateTeam(team.id, { color })} 
+                        />
                       </div>
                     </div>
 
@@ -1018,113 +1102,6 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
               </>
             )}
           </button>
-
-          {(teams.some(t => t.playerIds.length > 0) || jokerPlayerIds.length > 0) && (
-            <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl p-6 border border-zinc-100 dark:border-zinc-800 space-y-4">
-              <div className="flex items-center gap-2 mb-2">
-                <LayoutList size={18} className="text-zinc-400" />
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lagöversikt</h3>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {teams.filter(t => t.playerIds.length > 0 || teams.length <= 4).map((team, idx) => {
-                  const isThisTeamDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
-                  return (
-                    <div 
-                      key={team.id} 
-                      data-overview-team-id={team.id}
-                      className={`bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-200 dark:border-indigo-800 bg-indigo-50/10' : 'border-zinc-100 dark:border-zinc-800'}`}
-                      style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
-                    >
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
-                        <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
-                        <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
-                          {team.playerIds.length}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                        {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
-                          const player = squad.find(p => p.id === pid);
-                          return player ? (
-                            <motion.div 
-                              key={pid} 
-                              drag
-                              dragSnapToOrigin
-                              whileDrag={{ 
-                                zIndex: 9999, 
-                                scale: 1.1,
-                                pointerEvents: 'none'
-                              }}
-                              onDragStart={() => setDraggedPlayerId(pid)}
-                              onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
-                              className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
-                              style={{ backgroundColor: team.color }}
-                            >
-                              {player.name}
-                              {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
-                            </motion.div>
-                          ) : null;
-                        })}
-                        {team.playerIds.length === 0 && (
-                          <div className="w-full py-2 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest">
-                            Dra hit
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {(jokerPlayerIds.length > 0 || teams.length <= 4) && (() => {
-                  const isJokerDragging = draggedPlayerId && jokerPlayerIds.includes(draggedPlayerId);
-                  return (
-                    <div 
-                      data-overview-team-id="joker"
-                      className={`bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/30'}`}
-                      style={{ zIndex: isJokerDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
-                    >
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="w-3 h-3 rounded-full bg-indigo-600" />
-                        <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
-                        <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
-                          {jokerPlayerIds.length}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                        {sortPlayersByPosition(jokerPlayerIds || [], squad).map(pid => {
-                          const player = squad.find(p => p.id === pid);
-                          return player ? (
-                            <motion.div 
-                              key={pid} 
-                              drag
-                              dragSnapToOrigin
-                              whileDrag={{ 
-                                zIndex: 9999, 
-                                scale: 1.1,
-                                pointerEvents: 'none'
-                              }}
-                              onDragStart={() => setDraggedPlayerId(pid)}
-                              onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
-                              className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
-                            >
-                              {player.name}
-                              {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
-                            </motion.div>
-                          ) : null;
-                        })}
-                        {jokerPlayerIds.length === 0 && (
-                          <div className="w-full py-2 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-indigo-400 uppercase tracking-widest">
-                            Dra hit
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
         </form>
       </div>
 
