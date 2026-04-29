@@ -25,7 +25,7 @@ export const initDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const getCachedImage = async (url: string): Promise<string | null> => {
+export const getCachedImage = async (url: string): Promise<Blob | null> => {
   try {
     const db = await initDB();
     return new Promise((resolve) => {
@@ -36,7 +36,7 @@ export const getCachedImage = async (url: string): Promise<string | null> => {
       request.onsuccess = () => {
         const item = request.result as CachedItem | undefined;
         if (item) {
-          resolve(URL.createObjectURL(item.blob));
+          resolve(item.blob);
         } else {
           resolve(null);
         }

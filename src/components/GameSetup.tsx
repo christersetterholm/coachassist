@@ -368,9 +368,9 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="max-w-3xl mx-auto p-4 sm:p-6"
+      className="w-full max-w-3xl mx-auto sm:p-6"
     >
-      <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-xl p-6 sm:p-8 border border-zinc-100 dark:border-zinc-800 transition-colors duration-300 pb-32">
+      <div className="bg-white dark:bg-zinc-900 sm:rounded-3xl sm:shadow-xl p-4 sm:p-8 sm:border border-zinc-100 dark:border-zinc-800 transition-colors duration-300 pb-32">
         <form id="game-setup-form" onSubmit={handleStart} className="space-y-6">
           <div className="space-y-4">
             {/* Header: Name and Top Save */}

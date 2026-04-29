@@ -92,23 +92,6 @@ export default function App() {
   const syncUserIdRef = useRef<string | null>(null);
   const lastCloudDataRef = useRef<CoachData | null>(null);
 
-  // Lock to portrait mode if supported
-  useEffect(() => {
-    const lockPortrait = async () => {
-      try {
-        if (typeof window !== 'undefined' && window.screen && window.screen.orientation && (window.screen.orientation as any).lock) {
-          // Note: Many browsers require fullscreen for this to work via JS
-          // but for an installed PWA it might work differently in some environments.
-          await (window.screen.orientation as any).lock('portrait');
-        }
-      } catch (e) {
-        // Silently fail as many browsers don't support locking without fullscreen
-        console.warn('Screen orientation lock not supported or failed:', e);
-      }
-    };
-    lockPortrait();
-  }, []);
-
   // Initial load from localStorage for guests
   useEffect(() => {
     if (isAuthReady && !user && !isInitialSyncDone) {
@@ -139,10 +122,6 @@ export default function App() {
       };
 
       setData(newState);
-
-      if (savedActiveExerciseId) {
-        setView('exercise');
-      }
       
       // For guests, we are effectively "done" with initial sync immediately
       setIsInitialSyncDone(true);
@@ -266,14 +245,6 @@ export default function App() {
         setData(newState);
         lastCloudDataRef.current = newState;
         setSessionActionCount(0); // Reset after applying cloud truth
-        
-        // Auto-navigate to exercise view if one is active remotely
-        if (newState.activeExerciseId && view === 'training') {
-          setView('exercise');
-        }
-        if (!newState.activeExerciseId && view === 'exercise') {
-          setView('training');
-        }
         
         const syncTime = cloudData.updatedAt || Date.now();
         setLastSyncedAt(syncTime);
@@ -777,6 +748,11 @@ export default function App() {
     setData(prev => ({ ...prev, activeExerciseId: id }));
     setSessionActionCount(prev => prev + 1);
     setIsEditingActiveExercise(true);
+  };
+
+  const handleReorderLineups = (reordered: Lineup[]) => {
+    setData(prev => ({ ...prev, lineups: reordered }));
+    setSessionActionCount(prev => prev + 1);
   };
 
   const handleRankClick = () => {
@@ -1619,6 +1595,7 @@ export default function App() {
                 setSessionActionCount(prev => prev + 1);
               }}
               onCopyLineup={handleCopyLineup}
+              onReorderLineups={handleReorderLineups}
               onUpdateSquad={handleUpdateSquad}
               customFormations={customFormations}
               pinnedFormationIds={pinnedFormationIds}
@@ -1944,7 +1921,7 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-zinc-50 dark:bg-zinc-950 z-[60] overflow-y-auto"
           >
-            <div className="min-h-screen py-8">
+            <div className="min-h-screen sm:py-8">
               <GameSetup 
                 initialGame={activeExercise} 
                 onStartGame={handleSaveEditedExercise}

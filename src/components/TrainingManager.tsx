@@ -51,10 +51,10 @@ function SessionItem({
       dragControls={dragControls}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="group bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden active:scale-[0.98] active:shadow-lg z-0"
+      className="group bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden active:scale-[0.98] active:shadow-lg z-0"
       onClick={() => onSelectSession(session.id)}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 sm:gap-4">
         {/* Enhanced Drag Handle for better touch response */}
         <div 
           onPointerDown={(e) => dragControls.start(e)}
@@ -69,13 +69,13 @@ function SessionItem({
               <h3 className="text-lg font-black text-zinc-900 dark:text-white mb-1 group-hover:text-indigo-600 transition-colors uppercase">
                 {session.title || 'Träning'}
               </h3>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 font-medium">
-                <span className="flex items-center gap-1 capitalize">
-                  <Calendar size={14} className="text-zinc-400" />
+              <div className="flex flex-wrap items-center gap-x-2.5 sm:gap-x-3 gap-y-1 text-[11px] sm:text-xs text-zinc-500 font-medium">
+                <span className="flex items-center gap-1 capitalize whitespace-nowrap">
+                  <Calendar size={13} className="text-zinc-400 shrink-0" />
                   {date}
                 </span>
-                <span className="flex items-center gap-1">
-                  <Clock size={14} className="text-zinc-400" />
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <Clock size={13} className="text-zinc-400 shrink-0" />
                   {session.startTime} ({totalMinutes} min)
                 </span>
                 {session.notes && (
@@ -164,8 +164,7 @@ export default function TrainingManager({
   onReorderSessions,
   onUpdateSession
 }: TrainingManagerProps) {
-  const [activeTab, setActiveTab] = useState<'sessions' | 'exercises'>('sessions');
-  const [sessionFilter, setSessionFilter] = useState<'planned' | 'completed'>('planned');
+  const [activeTab, setActiveTab ] = useState<'planned' | 'completed' | 'exercises'>('planned');
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
 
@@ -287,77 +286,72 @@ export default function TrainingManager({
       </AnimatePresence>
 
       {/* Tab Switcher */}
-      <div className="flex p-1 bg-zinc-100 dark:bg-zinc-900 rounded-2xl mb-8 mx-4 sm:mx-0">
+      <div className="flex p-1 bg-zinc-100 dark:bg-zinc-900 rounded-2xl mb-4 sm:mb-8 mx-4 sm:mx-0">
         <button
-          onClick={() => setActiveTab('sessions')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${
-            activeTab === 'sessions'
+          onClick={() => setActiveTab('planned')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1 rounded-xl text-[10px] sm:text-sm font-black uppercase tracking-tight sm:tracking-normal sm:capitalize sm:font-bold transition-all ${
+            activeTab === 'planned'
               ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
               : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
           }`}
         >
-          <Calendar size={18} />
-          <span>Träningspass</span>
+          <Calendar size={16} className="hidden sm:block" />
+          <span>Planerade</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('completed')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1 rounded-xl text-[10px] sm:text-sm font-black uppercase tracking-tight sm:tracking-normal sm:capitalize sm:font-bold transition-all ${
+            activeTab === 'completed'
+              ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+              : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+          }`}
+        >
+          <History size={16} className="hidden sm:block" />
+          <span>Genomförda</span>
         </button>
         <button
           onClick={() => setActiveTab('exercises')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1 rounded-xl text-[10px] sm:text-sm font-black uppercase tracking-tight sm:tracking-normal sm:capitalize sm:font-bold transition-all ${
             activeTab === 'exercises'
               ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
               : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
           }`}
         >
-          <Dribbble size={18} />
-          <span>Tävlingsmoment</span>
+          <Trophy size={16} className="hidden sm:block" />
+          <span>Tävling</span>
         </button>
       </div>
 
-      {activeTab === 'sessions' ? (
+      {activeTab !== 'exercises' ? (
         <div className="px-4 sm:px-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-zinc-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-800">
-                <button
-                  onClick={() => setSessionFilter('planned')}
-                  className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all ${
-                    sessionFilter === 'planned' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
-                  }`}
-                >
-                  Planerade
-                </button>
-                <button
-                  onClick={() => setSessionFilter('completed')}
-                  className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all ${
-                    sessionFilter === 'completed' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
-                  }`}
-                >
-                  Genomförda
-                </button>
-              </div>
-            </div>
+          <div className="flex items-center justify-between mb-6 gap-4">
+            <h2 className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-wider">
+              {activeTab === 'planned' ? 'Planerade träningspass' : 'Genomförda träningspass'}
+            </h2>
             <button
               onClick={onNewSession}
               className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
             >
               <Plus size={18} />
-              Planera träningspass
+              <span className="hidden sm:inline">Planera träningspass</span>
+              <span className="sm:hidden">Planera</span>
             </button>
           </div>
 
-          {[...sessions].filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted).length === 0 ? (
+          {[...sessions].filter(s => activeTab === 'completed' ? s.isCompleted : !s.isCompleted).length === 0 ? (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 sm:p-12 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800">
               <div className="w-16 h-16 bg-zinc-50 dark:bg-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-zinc-400">
                 <Calendar size={32} />
               </div>
               <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
-                Inga {sessionFilter === 'completed' ? 'genomförda' : 'planerade'} träningspass
+                Inga {activeTab === 'completed' ? 'genomförda' : 'planerade'} träningspass
               </h3>
               <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8">
-                {sessionFilter === 'completed' 
+                {activeTab === 'completed' 
                   ? 'När du markerar ett träningspass som genomfört hamnar det här.'
                   : 'Börja planera din nästa träning genom att lägga till tävlingsmoment och tider.'}
               </p>
-              {sessionFilter === 'planned' && (
+              {activeTab === 'planned' && (
                 <button
                   onClick={onNewSession}
                   className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all"
@@ -369,16 +363,16 @@ export default function TrainingManager({
           ) : (
             <Reorder.Group 
               axis="y" 
-              values={sessions.filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted)} 
+              values={sessions.filter(s => activeTab === 'completed' ? s.isCompleted : !s.isCompleted)} 
               onReorder={(newOrder) => {
                 // We need to merge the reordered filtered list back into the main list
-                const otherCategory = sessions.filter(s => sessionFilter === 'completed' ? !s.isCompleted : s.isCompleted);
+                const otherCategory = sessions.filter(s => activeTab === 'completed' ? !s.isCompleted : s.isCompleted);
                 onReorderSessions([...newOrder, ...otherCategory]);
               }} 
               className="grid gap-4"
             >
               {[...sessions]
-                .filter(s => sessionFilter === 'completed' ? s.isCompleted : !s.isCompleted)
+                .filter(s => activeTab === 'completed' ? s.isCompleted : !s.isCompleted)
                 .map((session) => {
                   const date = new Date(session.date).toLocaleDateString('sv-SE', {
                     weekday: 'long',

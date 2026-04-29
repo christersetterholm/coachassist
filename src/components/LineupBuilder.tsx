@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toPng } from 'html-to-image';
+// import html2canvas from 'html-to-image'; // Removed
 import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Download, Maximize2, Minimize2, Copy, Gamepad2, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff } from 'lucide-react';
+import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, GripVertical, Footprints } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
+import { Reorder } from 'motion/react';
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -18,6 +20,7 @@ interface LineupBuilderProps {
   onDeleteLineup: (id: string) => void;
   onSelectLineup: (id: string) => void;
   onCopyLineup: (id: string) => void;
+  onReorderLineups: (lineups: Lineup[]) => void;
   onUpdateSquad: (squad: SquadPlayer[]) => void;
   customFormations?: FormationVariant[];
   pinnedFormationIds?: string[];
@@ -26,6 +29,13 @@ interface LineupBuilderProps {
   onTogglePinFormation?: (id: string) => void;
   user: FirebaseUser | null;
 }
+
+const EXPORT_FORMATS = {
+  responsive: { width: typeof window !== 'undefined' ? window.innerWidth : 1200, height: typeof window !== 'undefined' ? window.innerHeight : 800, label: 'Anpassad' },
+  mobile: { width: 537, height: 1044, label: 'iPhone' },
+  tablet: { width: 1536, height: 2048, label: 'iPad' },
+  desktop: { width: 2560, height: 1664, label: 'MacBook' }
+};
 
 export default function LineupBuilder({ 
   squad, 
@@ -36,6 +46,7 @@ export default function LineupBuilder({
   onDeleteLineup,
   onSelectLineup,
   onCopyLineup,
+  onReorderLineups,
   onUpdateSquad,
   customFormations = [],
   pinnedFormationIds = [],
@@ -66,6 +77,9 @@ export default function LineupBuilder({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [isLayoutExpanded, setIsLayoutExpanded] = useState(false);
+  const [isZoomExpanded, setIsZoomExpanded] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [selectedForEdit, setSelectedForEdit] = useState<string | null>(null); // LineupPlayer id
@@ -74,6 +88,7 @@ export default function LineupBuilder({
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
 
   // Tactical Board State
   const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'eraser' | 'ball' | 'opponent'>('pen');
@@ -150,6 +165,9 @@ export default function LineupBuilder({
   const [tempTitle, setTempTitle] = useState('');
   const [tempTeamName, setTempTeamName] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'responsive' | 'mobile' | 'tablet' | 'desktop'>('mobile');
+  const [isScreenshotMode, setIsScreenshotMode] = useState(false);
   const [showFormationModal, setShowFormationModal] = useState(false);
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
@@ -260,25 +278,174 @@ export default function LineupBuilder({
     if (exportRef.current === null) return;
     
     setIsExporting(true);
-    // Allow a small delay for the state change to propagate to the DOM if needed, 
-    // although React usually handles this before the next async step in most cases 
-    // when using await.
+    
+    // Safety timeout: if export hasn't finished in 25 seconds, reset UI
+    const safetyTimeout = setTimeout(() => {
+      setIsExporting(false);
+      console.warn('Export timed out');
+    }, 25000);
+    
+    // Get actual dimensions for responsive if needed
+    const target = exportFormat === 'responsive' 
+      ? { width: window.innerWidth, height: window.innerHeight, label: 'Responsiv' }
+      : EXPORT_FORMATS[exportFormat];
+      
+    const isDark = document.documentElement.classList.contains('dark');
+    const isSmallTarget = target.width < 640;
+    
+    // Inject temporary styles into a dedicated node for the export target
+    const style = document.createElement('style');
+    style.id = 'export-styles';
+    style.innerHTML = `
+      #export-target-actual * {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        filter: none !important;
+        transition: none !important;
+        animation: none !important;
+      }
+      #export-target-actual {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: ${target.width}px !important;
+        height: ${target.height}px !important;
+        min-width: ${target.width}px !important;
+        max-width: ${target.width}px !important;
+        min-height: ${target.height}px !important;
+        padding: ${isSmallTarget ? '20px 10px' : '60px 40px'} !important;
+        background-color: ${isDark ? '#09090b' : '#ffffff'} !important;
+        position: fixed !important;
+        left: -50000px !important;
+        top: -50000px !important;
+        z-index: -9999 !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        overflow: hidden !important;
+      }
+      #export-target-actual .football-pitch {
+        width: ${isSmallTarget ? target.width - 20 : target.width - 80}px !important;
+        max-width: ${isSmallTarget ? target.width - 20 : target.width - 80}px !important;
+        margin-bottom: ${isSmallTarget ? '15px' : '30px'} !important;
+        flex-shrink: 0 !important;
+      }
+      #export-target-actual h1 { 
+        font-size: ${isSmallTarget ? '24px' : '84px'} !important; 
+        margin-bottom: 6px !important;
+        text-align: center !important;
+        line-height: 1.1 !important;
+      }
+      #export-target-actual h2 { 
+        font-size: ${isSmallTarget ? '12px' : '42px'} !important; 
+        margin-bottom: 18px !important;
+        text-align: center !important;
+      }
+      #export-target-actual .bench-container {
+        padding: ${isSmallTarget ? '10px' : '25px'} !important;
+        width: 100% !important;
+        max-width: ${isSmallTarget ? target.width - 20 : target.width - 80}px !important;
+        flex-shrink: 0 !important;
+      }
+      #export-target-actual .bench-container img, #export-target-actual .football-pitch img {
+        width: ${isSmallTarget ? '60px' : 'auto'} !important;
+        height: ${isSmallTarget ? '60px' : 'auto'} !important;
+      }
+      #export-target-actual h1, #export-target-actual h2, #export-target-actual h3, #export-target-actual p, #export-target-actual span {
+        color: ${isDark ? '#ffffff' : '#18181b'} !important;
+      }
+      #export-target-actual > div {
+        transform: scale(${previewZoom}) !important;
+        transform-origin: top center !important;
+      }
+    `;
     
     try {
-      // Small timeout to ensure Reat has rendered the "isExporting" state
-      await new Promise(resolve => setTimeout(resolve, 50));
+      document.head.appendChild(style);
       
-      const dataUrl = await toPng(exportRef.current, { cacheBust: true, pixelRatio: 2 });
-      const link = document.createElement('a');
-      link.download = `${lineupName || 'laguppställning'}.png`;
-      link.href = dataUrl;
-      link.click();
+      // Wait for layout to settle off-screen and for images to start converting to base64
+      // Increased to 6 seconds for mobile/PWA to ensure state sync
+      await new Promise(resolve => setTimeout(resolve, isSmallTarget ? 6000 : 4000));
+      
+      const element = document.getElementById('export-target-actual');
+      if (!element) throw new Error('Export-nod hittades inte');
+      
+      // Wait for all images in the export node to be fully loaded
+      const images = Array.from(element.querySelectorAll('img')) as HTMLImageElement[];
+      console.log(`Väntar på ${images.length} bilder i export-läge...`);
+      
+      await Promise.all(images.map(img => {
+        if (img.complete && img.naturalHeight !== 0) return Promise.resolve();
+        return new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+          setTimeout(resolve, 8000);
+        });
+      }));
+      
+      // Final stabilize
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const options = {
+        cacheBust: true,
+        pixelRatio: exportFormat === 'mobile' ? 2 : 1, // Use 2x for smaller mobile res to keep quality
+        backgroundColor: isDark ? '#09090b' : '#ffffff',
+        width: target.width,
+        height: target.height,
+        onClone: (clonedDoc: Document) => {
+          const clonedImages = Array.from(clonedDoc.getElementsByTagName('img'));
+          clonedImages.forEach(img => {
+            img.loading = 'eager';
+            img.decoding = 'sync';
+            img.style.opacity = '1';
+            img.style.visibility = 'visible';
+            img.style.display = 'block';
+            // Force anonymous crossOrigin for external images
+            if (img.src.startsWith('http')) {
+              img.crossOrigin = 'anonymous';
+            }
+          });
+        },
+        style: {
+          transform: 'none',
+          position: 'static',
+          margin: '0',
+          padding: '0',
+          left: '0',
+          top: '0'
+        },
+      };
+
+      try {
+        const dataUrl = await toPng(element, options);
+        
+        if (!dataUrl || dataUrl === 'data:,') {
+          throw new Error('Exporten genererade en tom bild');
+        }
+        
+        // 3. Trigger download
+        const link = document.createElement('a');
+        link.download = `${lineupName || 'laguppställning'}-${target.label.replace(/\s+/g, '_')}.png`;
+        link.href = dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        console.log('Export klar!');
+      } catch (innerErr) {
+        console.error('toPng misslyckades', innerErr);
+        // On error, the styling is still cleaned up below
+      }
     } catch (err) {
-      console.error('Kunde inte exportera bild:', err);
+      console.error('Exportfel:', err);
     } finally {
+      // Clean up styles
+      const styleNode = document.getElementById('export-styles');
+      if (styleNode) document.head.removeChild(styleNode);
+      
+      clearTimeout(safetyTimeout);
       setIsExporting(false);
     }
-  }, [lineupName]);
+  }, [lineupName, teamName, exportFormat]);
 
   // Global listeners for dragging
   useEffect(() => {
@@ -744,8 +911,474 @@ export default function LineupBuilder({
   const starters = useMemo(() => validLineupPlayers.filter(p => !p.isSubstitute), [validLineupPlayers]);
   const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
 
+  const renderLineupContent = (isSimplified: boolean = false, customRef?: React.Ref<HTMLDivElement>) => {
+    // Determine sizing based on context
+    const isExportMode = !isSimplified && !isMaximized;
+    const isMobileExport = (exportFormat === 'mobile' || (exportFormat === 'responsive' && typeof window !== 'undefined' && window.innerWidth < 640)) && isSimplified;
+
+    return (
+      <div 
+        ref={customRef || (isSimplified ? null : exportRef)} 
+        id={isSimplified ? "preview-container" : "export-container"} 
+        className={`bg-white dark:bg-zinc-900 rounded-3xl p-3 sm:p-6 shadow-xl border border-zinc-100 dark:border-zinc-800 transition-all ${
+          isSimplified ? 'w-full mx-auto' : (isMaximized ? 'max-w-5xl mx-auto dark:bg-zinc-950 border-none shadow-none !p-0' : 'mb-4')
+        }`}
+        style={isSimplified ? { maxWidth: exportFormat === 'responsive' ? '100%' : exportFormat === 'mobile' ? '390px' : exportFormat === 'tablet' ? '600px' : '1000px' } : undefined}
+      >
+        {/* Export Header - Title & Team Logo */}
+        {(!isMaximized || isSimplified) && (
+          <div className="flex items-center justify-between mb-6 px-2">
+            <div 
+              className={`flex flex-col ${isSimplified ? '' : 'cursor-pointer group/title'}`}
+              onClick={isSimplified ? undefined : () => {
+                setTempTitle(lineupName);
+                setTempTeamName(teamName);
+                setIsEditingTitle(true);
+              }}
+            >
+              <div className="flex flex-col gap-1">
+                <h1 className={`${exportFormat === 'mobile' && isSimplified ? 'text-xl' : 'text-2xl'} font-black text-zinc-900 dark:text-white tracking-tight leading-none`}>
+                  {teamName || 'Ditt Lag'}
+                </h1>
+                <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 tracking-tight leading-none flex items-center gap-2 overflow-hidden">
+                  <span className="whitespace-nowrap">{lineupName || 'Namnlös Match'}</span>
+                  {!isSimplified && <Edit2 size={12} className="opacity-0 group-hover/title:opacity-100 transition-opacity" />}
+                </h2>
+              </div>
+              {(!lineupName && !teamName && !isSimplified) && (
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-2">Tryck för att ändra rubriker</span>
+              )}
+            </div>
+            {/* Team Logo / Icon */}
+            <div className="flex items-center gap-3">
+              {!isSimplified && (
+                <input
+                  type="file"
+                  ref={logoInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleLogoUpload}
+                />
+              )}
+              <div className="text-right hidden xs:block">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{user?.displayName || 'Gäst'}</p>
+              </div>
+              <div 
+                onClick={isSimplified ? undefined : () => logoInputRef.current?.click()}
+                className={`w-12 h-12 rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm transition-all relative ${isSimplified ? '' : 'hover:border-indigo-400 active:scale-95 group/logo cursor-pointer'}`}
+              >
+                {teamLogoUrl ? (
+                  <CachedImage src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-cover" />
+                ) : user?.photoURL ? (
+                  <CachedImage src={user.photoURL} alt="User Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20">
+                    <ImageIcon size={20} />
+                  </div>
+                )}
+                {!isSimplified && (
+                  <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover/logo:opacity-100 flex items-center justify-center transition-opacity">
+                    <Upload size={14} className="text-indigo-600" />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* The Football Pitch */}
+        <div 
+          ref={isSimplified ? null : fieldRef}
+          className={`football-pitch relative aspect-[2/3] rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-colors duration-500 ${
+            (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') ? 'bg-sky-300' : 'bg-[#8dc343]'
+          } ${(isMaximized && !isSimplified) ? 'cursor-crosshair touch-none select-none' : ''}`}
+          onPointerDown={isSimplified ? undefined : handleTacticalStart}
+          onPointerMove={isSimplified ? undefined : handleTacticalMove}
+          onPointerUp={isSimplified ? undefined : handleTacticalEnd}
+          onPointerLeave={isSimplified ? undefined : handleTacticalEnd}
+          style={{
+            backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
+              `repeating-linear-gradient(
+                to right,
+                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'},
+                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
+                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
+                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
+              )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
+            ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
+              `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
+            ) : 'none',
+            backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
+          }}
+        >
+          {/* Tactical Drawing Layer */}
+          {(isMaximized || isSimplified) && (
+            <svg 
+              className="absolute inset-0 z-40 pointer-events-none"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              style={{ width: '100%', height: '100%' }}
+            >
+              <defs>
+                <marker id={`arrowhead-white-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="white" /></marker>
+                <marker id={`arrowhead-red-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ef4444" /></marker>
+                <marker id={`arrowhead-yellow-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#facc15" /></marker>
+              </defs>
+              
+              {/* Previous Drawings */}
+              {tacticalDrawings.map((draw) => (
+                <g key={draw.id}>
+                  {draw.type === 'pen' ? (
+                    <path
+                      d={`M ${draw.points[0].x} ${draw.points[0].y} ${draw.points.slice(1).map((p: any) => `L ${p.x} ${p.y}`).join(' ')}`}
+                      fill="none"
+                      stroke={draw.color}
+                      strokeWidth={draw.lineWidth || 0.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                    />
+                  ) : (
+                    <line
+                      x1={draw.points[0].x}
+                      y1={draw.points[0].y}
+                      x2={draw.points[1].x}
+                      y2={draw.points[1].y}
+                      stroke={draw.color}
+                      strokeWidth={draw.lineWidth || 0.8}
+                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                      markerEnd={`url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
+                    />
+                  )}
+                </g>
+              ))}
+
+              {/* Current Drawing */}
+              {!isSimplified && isDrawing && currentPath.length > 1 && (
+                <g>
+                   {tacticalTool === 'pen' ? (
+                    <path
+                      d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
+                      fill="none"
+                      stroke={tacticalColor}
+                      strokeWidth={tacticalLineWidth}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                    />
+                  ) : (
+                    <line
+                      x1={currentPath[0].x}
+                      y1={currentPath[0].y}
+                      x2={currentPath[1].x}
+                      y2={currentPath[1].y}
+                      stroke={tacticalColor}
+                      strokeWidth={tacticalLineWidth}
+                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                      markerEnd={`url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
+                    />
+                  )}
+                </g>
+              )}
+            </svg>
+          )}
+
+          {/* Opponents Layer */}
+          {(isMaximized || isSimplified) && showOpponents && opponents.map((opp) => (
+            <div 
+              key={opp.id}
+              className={`absolute z-40 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
+              onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
+              onPointerUp={isSimplified ? undefined : clearLongPress}
+              onPointerCancel={isSimplified ? undefined : clearLongPress}
+              onPointerMove={isSimplified ? undefined : (e) => {
+                if (draggingOpponentId === opp.id) {
+                  clearLongPress();
+                }
+              }}
+              style={{
+                left: `${opp.x}%`,
+                top: `${opp.y}%`,
+                transform: 'translate(-50%, -50%)',
+                width: `${playerScale * 50}px`,
+                height: `${playerScale * 50}px`,
+              }}
+            >
+              <div className="w-full h-full bg-zinc-800 rounded-full flex items-center justify-center shadow-lg border border-zinc-900 border-dashed">
+                <Shirt size={playerScale * 24} className="text-zinc-400" />
+              </div>
+            </div>
+          ))}
+
+          {/* Football Icon */}
+          {(isMaximized || isSimplified) && footballPos && (
+            <div 
+              className={`absolute z-50 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
+              onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball')}
+              onPointerUp={isSimplified ? undefined : clearLongPress}
+              onPointerCancel={isSimplified ? undefined : clearLongPress}
+              onPointerMove={isSimplified ? undefined : (e) => {
+                if (draggingBall) {
+                  clearLongPress();
+                }
+              }}
+              style={{
+                left: `${footballPos.x}%`,
+                top: `${footballPos.y}%`,
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-zinc-200">
+                <div className="w-full h-full rounded-full border-[3px] border-zinc-900 border-dashed" />
+              </div>
+            </div>
+          )}
+
+          {/* Main Field Lines Inset */}
+          <div className="absolute top-[2%] bottom-[2%] left-[4%] right-[4%] border-2 border-white pointer-events-none" />
+          <div className="absolute top-1/2 left-[4%] right-[4%] h-[2px] bg-white" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[25%] aspect-square border-2 border-white rounded-full flex items-center justify-center">
+            <div className="w-1.5 h-1.5 bg-white rounded-full" />
+          </div>
+
+          <div className="absolute top-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-b-2 border-x-2 border-white pointer-events-none">
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-b-2 border-x-2 border-white" />
+            <div className="absolute top-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
+          </div>
+          <div className="absolute top-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-b-2 border-white rounded-b-full overflow-hidden pointer-events-none" />
+          
+          <div className="absolute bottom-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-t-2 border-x-2 border-white pointer-events-none">
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-t-2 border-x-2 border-white" />
+            <div className="absolute bottom-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
+          </div>
+          <div className="absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-t-2 border-white rounded-t-full overflow-hidden pointer-events-none" />
+
+          {/* Draggable Players on Field */}
+          <AnimatePresence>
+            {starters.map((p) => {
+              const sp = getSquadPlayer(p.playerId);
+              if (!sp) return null;
+              
+              const isDragging = draggingId === p.id;
+              const displayX = isDragging && dragPos ? dragPos.x : p.x;
+              const displayY = isDragging && dragPos ? dragPos.y : p.y;
+
+              return (
+                <div
+                  key={p.id}
+                  className={`absolute z-10 player-node group select-none transition-transform active:scale-110 ${
+                    isSimplified ? '' : (isEditMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing')
+                  } ${isDragging ? 'z-50' : ''}`}
+                  style={{
+                    left: `${displayX}%`,
+                    top: `${displayY}%`,
+                    touchAction: 'none',
+                    transform: 'translate(-50%, -50%)',
+                    transition: (isDragging || isSimplified) ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                  }}
+                  onPointerDown={isSimplified ? undefined : (e) => {
+                    e.stopPropagation();
+                    if (!isEditMode) {
+                      setDraggingId(p.id);
+                      setDragPos({ x: p.x, y: p.y });
+                    }
+                  }}
+                  onClick={isSimplified ? undefined : (e) => {
+                    e.stopPropagation();
+                    if (isEditMode) {
+                      setSelectedForEdit(p.id);
+                    }
+                  }}
+                >
+                  <div className="flex flex-col items-center">
+                    <div className="relative">
+                      <div 
+                        className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 overflow-hidden shadow-2xl transition-all ${
+                          !isSimplified && isEditMode 
+                            ? 'border-indigo-500 ring-4 ring-indigo-500/20' 
+                            : 'border-white'
+                        } ${!isSimplified ? 'group-hover:scale-110' : ''} ${isDragging ? 'scale-125 border-indigo-400' : ''}`}
+                        style={{ 
+                          width: `${3.5 * playerScale}rem`, 
+                          height: `${3.5 * playerScale}rem`,
+                          display: showPhoto ? 'flex' : 'none'
+                        }}
+                      >
+                        {sp.photoUrl ? (
+                          <CachedImage 
+                            src={sp.photoUrl} 
+                            alt={sp.name} 
+                            className="w-full h-full object-cover pointer-events-none" 
+                            decoding="async"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
+                            <User size={24 * playerScale} />
+                          </div>
+                        )}
+                        
+                        {!isSimplified && isEditMode && (
+                          <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                            <Edit2 size={20 * playerScale} className="text-white" />
+                          </div>
+                        )}
+                      </div>
+                      {sp.number && showNumber && (
+                        <div 
+                          className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg"
+                          style={{
+                            width: `${1.5 * playerScale}rem`,
+                            height: `${1.5 * playerScale}rem`,
+                            fontSize: `${0.6 * playerScale}rem`,
+                            bottom: showPhoto ? 0 : 'auto',
+                            right: showPhoto ? 0 : 'auto',
+                            top: !showPhoto ? '50%' : 'auto',
+                            left: !showPhoto ? '50%' : 'auto',
+                            transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                            position: showPhoto ? 'absolute' : 'relative'
+                          }}
+                        >
+                          {sp.number}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-1">
+                      <div 
+                        className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
+                          (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
+                            `rounded-full px-2 py-0.5 shadow-md border ${
+                              nameTagStyle === 'dark' 
+                                ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
+                                : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200')
+                            }`
+                          ) : 'gap-0.5'
+                        }`}
+                        style={{
+                          fontSize: `${0.6 * playerScale}rem`,
+                          opacity: isDragging ? 0.3 : 1,
+                        }}
+                      >
+                        {getVisibleName(sp.name).split(' ').map((part, i) => (
+                          <div 
+                            key={i} 
+                            className={`truncate ${
+                              nameBackgroundType === 'solid' ? (
+                                `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
+                              ) : 
+                              (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
+                              (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
+                            }`}
+                          >
+                            {part}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+
+        {/* Bench Area */}
+        <div className="bench-container mb-0">
+          <div className={`p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
+            subs.length > 6 
+              ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-3 sm:gap-4' 
+              : 'flex flex-wrap justify-center gap-2 sm:gap-4'
+          }`}>
+            {subs.length === 0 ? (
+              <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
+            ) : (
+              subs.map(p => {
+                const sp = getSquadPlayer(p.playerId);
+                if (!sp) return null;
+                const isDragging = draggingId === p.id;
+                     return (
+                  <div 
+                    key={p.id} 
+                    className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-pointer'}`}
+                    onPointerDown={isSimplified ? undefined : (e) => {
+                      e.stopPropagation();
+                      if (!isEditMode) {
+                        setDraggingId(p.id);
+                        setDragPos({ x: 50, y: 90 }); 
+                      }
+                    }}
+                    onClick={isSimplified ? undefined : (e) => {
+                      e.stopPropagation();
+                      if (isEditMode) {
+                        setSelectedForEdit(p.id)
+                      }
+                    }}
+                  >
+                      <div className="relative">
+                        <div 
+                          className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
+                          style={{
+                            width: `${3.5 * playerScale}rem`,
+                            height: `${3.5 * playerScale}rem`,
+                            display: showPhoto ? 'flex' : 'none'
+                          }}
+                        >
+                          {sp.photoUrl ? (
+                            <CachedImage 
+                              src={sp.photoUrl} 
+                              alt={sp.name} 
+                              className="w-full h-full object-cover" 
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                              <User size={24 * playerScale} />
+                            </div>
+                          )}
+                        </div>
+                        {sp.number && showNumber && (
+                          <div 
+                            className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
+                            style={{
+                              width: `${1.5 * playerScale}rem`,
+                              height: `${1.5 * playerScale}rem`,
+                              fontSize: `${0.6 * playerScale}rem`,
+                              bottom: showPhoto ? 0 : 'auto',
+                              right: showPhoto ? 0 : 'auto',
+                              top: !showPhoto ? '50%' : 'auto',
+                              left: !showPhoto ? '50%' : 'auto',
+                              transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                              position: showPhoto ? 'absolute' : 'relative',
+                              zIndex: 10
+                            }}
+                          >
+                            {sp.number}
+                          </div>
+                        )}
+                      </div>
+                    <div 
+                      className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
+                      style={{
+                        fontSize: `${0.6 * playerScale}rem`,
+                        marginTop: `${0.4 * playerScale}rem`
+                      }}
+                    >
+                      {getVisibleName(sp.name).split(' ').map((part, i) => (
+                        <div key={i} className="truncate">{part}</div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className={`mx-auto transition-all duration-500 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
+    <div className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
       {isMaximized && (
         <>
           <button
@@ -875,545 +1508,63 @@ export default function LineupBuilder({
         </>
       )}
 
-      <div ref={exportRef} className={`bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-xl border border-zinc-100 dark:border-zinc-800 mb-4 ${isMaximized ? 'max-w-5xl mx-auto dark:bg-zinc-950 border-none shadow-none !p-0' : ''}`}>
-        {/* Export Header - Title & Team Logo (Hidden in fullscreen for focus) */}
-        {!isMaximized && (
-          <div className="flex items-center justify-between mb-6 px-2">
-            <div 
-              className="flex flex-col cursor-pointer group/title"
-              onClick={() => {
-                setTempTitle(lineupName);
-                setTempTeamName(teamName);
-                setIsEditingTitle(true);
-              }}
-            >
-              <div className="flex flex-col gap-1">
-                <h1 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">
-                  {teamName || 'Ditt Lag'}
-                </h1>
-                <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 tracking-tight leading-none flex items-center gap-2">
-                  <span>{lineupName || 'Namnlös Match'}</span>
-                  <Edit2 size={12} className="opacity-0 group-hover/title:opacity-100 transition-opacity" />
-                </h2>
-              </div>
-              {(!lineupName && !teamName) && (
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-2">Tryck för att ändra rubriker</span>
-              )}
-            </div>
-            {/* Team Logo / Icon */}
-            <div className="flex items-center gap-3">
-              <input
-                type="file"
-                ref={logoInputRef}
-                className="hidden"
-                accept="image/*"
-                onChange={handleLogoUpload}
-              />
-              <div className="text-right hidden xs:block">
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{user?.displayName || 'Gäst'}</p>
-              </div>
-              <button 
-                onClick={() => logoInputRef.current?.click()}
-                className="w-12 h-12 rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm hover:border-indigo-400 transition-all active:scale-95 group/logo relative"
-              >
-                {teamLogoUrl ? (
-                  <CachedImage src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                ) : user?.photoURL ? (
-                  <CachedImage src={user.photoURL} alt="User Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20">
-                    <ImageIcon size={20} />
-                  </div>
-                )}
-                {/* Subtle hover indicator */}
-                <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover/logo:opacity-100 flex items-center justify-center transition-opacity">
-                  <Upload size={14} className="text-indigo-600" />
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* The Football Pitch */}
+      {/* Dedicated off-screen export node - rendered only during export to avoid duplicate DOM issues */}
+      {isExporting && (
         <div 
-          ref={fieldRef}
-          className={`relative aspect-[2/3] rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-colors duration-500 ${
-            (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') ? 'bg-sky-300' : 'bg-[#8dc343]'
-          } ${isMaximized ? 'cursor-crosshair touch-none select-none' : ''}`}
-          onPointerDown={handleTacticalStart}
-          onPointerMove={handleTacticalMove}
-          onPointerUp={handleTacticalEnd}
-          onPointerLeave={handleTacticalEnd}
-          style={{
-            backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
-              `repeating-linear-gradient(
-                to right,
-                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'},
-                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
-                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
-                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
-              )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
-            ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
-              `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
-            ) : 'none',
-            backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
+          id="export-target-actual"
+          aria-hidden="true"
+          className="fixed left-[-50000px] top-[-50000px] select-none z-[-9999] overflow-hidden"
+          style={{ 
+            width: (exportFormat === 'responsive' ? window.innerWidth : EXPORT_FORMATS[exportFormat].width) + 'px', 
+            height: (exportFormat === 'responsive' ? window.innerHeight : EXPORT_FORMATS[exportFormat].height) + 'px', 
+            opacity: 0.01 
           }}
         >
-          {/* Tactical Drawing Layer */}
-          {isMaximized && (
-            <svg 
-              className="absolute inset-0 z-40 pointer-events-none"
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              style={{ width: '100%', height: '100%' }}
-            >
-              <defs>
-                <marker
-                  id="arrowhead"
-                  markerWidth="10"
-                  markerHeight="7"
-                  refX="10"
-                  refY="3.5"
-                  orient="auto"
-                >
-                  <polygon points="0 0, 10 3.5, 0 7" fill={tacticalColor} />
-                </marker>
-                {/* Specific colors if needed */}
-                <marker id="arrowhead-white" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="white" /></marker>
-                <marker id="arrowhead-red" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ef4444" /></marker>
-                <marker id="arrowhead-yellow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#facc15" /></marker>
-              </defs>
-              
-              {/* Previous Drawings */}
-              {tacticalDrawings.map((draw) => (
-                <g key={draw.id}>
-                  {draw.type === 'pen' ? (
-                    <path
-                      d={`M ${draw.points[0].x} ${draw.points[0].y} ${draw.points.slice(1).map((p: any) => `L ${p.x} ${p.y}`).join(' ')}`}
-                      fill="none"
-                      stroke={draw.color}
-                      strokeWidth={draw.lineWidth || 0.8}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
-                    />
-                  ) : (
-                    <line
-                      x1={draw.points[0].x}
-                      y1={draw.points[0].y}
-                      x2={draw.points[1].x}
-                      y2={draw.points[1].y}
-                      stroke={draw.color}
-                      strokeWidth={draw.lineWidth || 0.8}
-                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
-                      markerEnd={`url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'})`}
-                    />
-                  )}
-                </g>
-              ))}
+          {renderLineupContent(false)}
+        </div>
+      )}
 
-              {/* Current Drawing */}
-              {isDrawing && currentPath.length > 1 && (
-                <g>
-                   {tacticalTool === 'pen' ? (
-                    <path
-                      d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
-                      fill="none"
-                      stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
-                    />
-                  ) : (
-                    <line
-                      x1={currentPath[0].x}
-                      y1={currentPath[0].y}
-                      x2={currentPath[1].x}
-                      y2={currentPath[1].y}
-                      stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth}
-                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
-                      markerEnd={`url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'})`}
-                    />
-                  )}
-                </g>
-              )}
-            </svg>
-          )}
+      {/* The main field and players */}
+      <div className="w-full overflow-hidden rounded-3xl">
+        <div className="transition-transform origin-top" style={{ transform: previewZoom !== 1 ? `scale(${previewZoom})` : 'none', transformOrigin: 'top center' }}>
+          {renderLineupContent(false)}
+        </div>
+      </div>
 
-          {/* Opponents Layer */}
-          {isMaximized && showOpponents && opponents.map((opp) => (
-            <div 
-              key={opp.id}
-              className={`absolute z-40 transition-none cursor-move select-none`}
-              onPointerDown={(e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
-              onPointerUp={clearLongPress}
-              onPointerCancel={clearLongPress}
-              onPointerMove={(e) => {
-                if (draggingOpponentId === opp.id) {
-                  clearLongPress();
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setOpponents(prev => prev.filter(o => o.id !== opp.id));
-                setHasUnsavedChanges(true);
-              }}
-              style={{
-                left: `${opp.x}%`,
-                top: `${opp.y}%`,
-                transform: 'translate(-50%, -50%)',
-                width: `${playerScale * 50}px`,
-                height: `${playerScale * 50}px`,
-              }}
-            >
-              <div className="w-full h-full bg-zinc-800 rounded-full flex items-center justify-center shadow-lg border border-zinc-900 border-dashed">
-                <Shirt size={playerScale * 24} className="text-zinc-400" />
-              </div>
-            </div>
-          ))}
-
-          {/* Football Icon */}
-          {isMaximized && footballPos && (
-            <div 
-              className={`absolute z-50 transition-none cursor-move select-none`}
-              onPointerDown={(e) => handlePointerDownWithDeletion(e, 'ball')}
-              onPointerUp={clearLongPress}
-              onPointerCancel={clearLongPress}
-              onPointerMove={(e) => {
-                if (draggingBall) {
-                  clearLongPress();
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setFootballPos(null);
-                setHasUnsavedChanges(true);
-              }}
-              style={{
-                left: `${footballPos.x}%`,
-                top: `${footballPos.y}%`,
-                transform: 'translate(-50%, -50%)',
-              }}
-            >
-              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-zinc-200">
-                <div className="w-full h-full rounded-full border-[3px] border-zinc-900 border-dashed" />
-              </div>
-            </div>
-          )}
-          {!lineup && (
-            <div className="absolute inset-0 z-10 bg-black/20 backdrop-blur-[2px] flex items-center justify-center p-8">
-              <div className="bg-white/90 dark:bg-zinc-900/90 p-8 rounded-[32px] shadow-2xl border border-white dark:border-zinc-800 text-center max-w-xs scale-90 sm:scale-100">
-                <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-6 mx-auto">
-                  <ClipboardList size={32} />
-                </div>
-                <h3 className="text-xl font-black text-zinc-900 dark:text-white mb-2 tracking-tight">Hämta trupp?</h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 font-medium leading-relaxed">
-                  Välj en sparad laguppställning nedan eller skapa en helt ny för att börja bygga.
-                </p>
+        {!isMaximized && (
+          <>
+            <div className="flex flex-col items-center gap-6 mt-6">
+            {/* Consolidated Player Controls */}
+            <div className="flex flex-wrap justify-center items-center gap-3">
+              <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                 <button
-                  onClick={handleCreateNew}
-                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none active:scale-95"
+                  onClick={() => setPickerMode('starter')}
+                  className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2.5 bg-white dark:bg-zinc-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95 group"
+                  title="Hantera startelva"
                 >
-                  Skapa Ny
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <span>På planen ({starters.length})</span>
+                  </div>
+                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800" />
+                  <Plus size={14} className="group-hover:scale-110 transition-transform" />
+                </button>
+
+                <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5 sm:mx-1" />
+
+                <button
+                  onClick={() => setPickerMode('sub')}
+                  className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2.5 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95 group"
+                  title="Hantera bänk"
+                >
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <span>På bänken ({subs.length})</span>
+                  </div>
+                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800" />
+                  <Plus size={14} className="group-hover:scale-110 transition-transform" />
                 </button>
               </div>
-            </div>
-          )}
 
-          {/* Main Field Lines Inset */}
-          <div className="absolute top-[2%] bottom-[2%] left-[4%] right-[4%] border-2 border-white pointer-events-none" />
-          
-          {/* Center Line */}
-          <div className="absolute top-1/2 left-[4%] right-[4%] h-[2px] bg-white" />
-          
-          {/* Center Circle */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[25%] aspect-square border-2 border-white rounded-full flex items-center justify-center">
-            <div className="w-1.5 h-1.5 bg-white rounded-full" />
-          </div>
-
-          {/* TOP AREA */}
-          <div className="absolute top-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-b-2 border-x-2 border-white pointer-events-none">
-            {/* Goal Line Box */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-b-2 border-x-2 border-white" />
-            {/* Penalty Spot */}
-            <div className="absolute top-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
-          </div>
-          {/* TOP ARC - A shallow curved segment perfectly fitted to the box */}
-          <div className="absolute top-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-b-2 border-white rounded-b-full overflow-hidden pointer-events-none" />
-          
-          {/* BOTTOM AREA */}
-          <div className="absolute bottom-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-t-2 border-x-2 border-white pointer-events-none">
-            {/* Goal Line Box */}
-            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-t-2 border-x-2 border-white" />
-            {/* Penalty Spot */}
-            <div className="absolute bottom-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
-          </div>
-          {/* BOTTOM ARC - A shallow curved segment perfectly fitted to the box */}
-          <div className="absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-t-2 border-white rounded-t-full overflow-hidden pointer-events-none" />
-
-          {/* Draggable Players on Field and Bench */}
-          <AnimatePresence>
-            {validLineupPlayers.map((p) => {
-              const sp = getSquadPlayer(p.playerId);
-              if (!sp) return null;
-              
-              // Only render on field if not sub, OR if currently dragging
-              const isDragging = draggingId === p.id;
-              if (p.isSubstitute && !isDragging) return null;
-
-              const displayX = isDragging && dragPos ? dragPos.x : p.x;
-              const displayY = isDragging && dragPos ? dragPos.y : p.y;
-
-              return (
-                <div
-                  key={p.id}
-                  className={`absolute z-10 player-node group select-none transition-transform active:scale-110 ${
-                    isEditMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
-                  } ${isDragging ? 'z-50' : ''}`}
-                  style={{
-                    left: `${displayX}%`,
-                    top: `${displayY}%`,
-                    touchAction: 'none',
-                    transform: 'translate(-50%, -50%)',
-                    transition: isDragging ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-                  }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    if (!isEditMode) {
-                      setDraggingId(p.id);
-                      setDragPos({ x: p.x, y: p.y });
-                    }
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isEditMode) {
-                      setSelectedForEdit(p.id);
-                    }
-                  }}
-                >
-                  <div className="flex flex-col items-center">
-                    <div className="relative">
-                      <div 
-                        className={`rounded-full border-2 bg-[#0f172a] overflow-hidden shadow-2xl transition-all ${
-                          isEditMode 
-                            ? 'border-indigo-500 ring-4 ring-indigo-500/20' 
-                            : 'border-white group-hover:scale-110'
-                        } ${isDragging ? 'scale-125 border-indigo-400' : ''}`}
-                        style={{ 
-                          width: `${3.5 * playerScale}rem`, 
-                          height: `${3.5 * playerScale}rem`,
-                          display: showPhoto ? 'flex' : 'none'
-                        }}
-                      >
-                        {sp.photoUrl ? (
-                          <CachedImage 
-                            src={sp.photoUrl} 
-                            alt={sp.name} 
-                            className="w-full h-full object-cover pointer-events-none" 
-                            loading="lazy"
-                            decoding="async"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
-                            <User size={24 * playerScale} />
-                          </div>
-                        )}
-                        
-                        {isEditMode && (
-                          <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-                            <Edit2 size={20 * playerScale} className="text-white" />
-                          </div>
-                        )}
-                      </div>
-                      {sp.number && showNumber && (
-                        <div 
-                          className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg"
-                          style={{
-                            width: `${1.5 * playerScale}rem`,
-                            height: `${1.5 * playerScale}rem`,
-                            fontSize: `${0.6 * playerScale}rem`,
-                            bottom: showPhoto ? 0 : 'auto',
-                            right: showPhoto ? 0 : 'auto',
-                            top: !showPhoto ? '50%' : 'auto',
-                            left: !showPhoto ? '50%' : 'auto',
-                            transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                            position: showPhoto ? 'absolute' : 'relative'
-                          }}
-                        >
-                          {sp.number}
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-1">
-                      <div 
-                        className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
-                          (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
-                            `rounded-full px-2 py-0.5 shadow-md border ${
-                              nameTagStyle === 'dark' 
-                                ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
-                                : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200')
-                            }`
-                          ) : 'gap-0.5'
-                        }`}
-                        style={{
-                          fontSize: `${0.6 * playerScale}rem`,
-                          opacity: isDragging ? 0.3 : 1,
-                        }}
-                      >
-                        {getVisibleName(sp.name).split(' ').map((part, i) => (
-                          <div 
-                            key={i} 
-                            className={`truncate ${
-                              nameBackgroundType === 'solid' ? (
-                                `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
-                              ) : 
-                              (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
-                              (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
-                            }`}
-                          >
-                            {part}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </AnimatePresence>
-        </div>
-
-        {/* Bench Area */}
-        <div className="mb-0">
-          <div className={`p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
-            subs.length > 6 
-              ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-3 sm:gap-4' 
-              : 'flex flex-wrap justify-center gap-2 sm:gap-4'
-          }`}>
-            {subs.length === 0 ? (
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4">Inga avbytare...</p>
-            ) : (
-              subs.map(p => {
-                const sp = getSquadPlayer(p.playerId);
-                if (!sp) return null;
-                const isDragging = draggingId === p.id;
-                
-                return (
-                  <div 
-                    key={p.id} 
-                    className={`flex flex-col items-center gap-0 cursor-pointer group transition-opacity ${isDragging ? 'opacity-0' : 'opacity-100'}`}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      if (!isEditMode) {
-                        setDraggingId(p.id);
-                        setDragPos({ x: 50, y: 90 }); 
-                      }
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isEditMode) {
-                        setSelectedForEdit(p.id)
-                      }
-                    }}
-                  >
-                      <div className="relative">
-                        <div 
-                          className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm group-hover:scale-110 transition-all ${
-                            subs.length <= 6 ? 'w-10 h-10 sm:w-14 sm:h-14' : 'w-12 h-12 sm:w-14 sm:h-14'
-                          }`}
-                          style={{
-                            display: showPhoto ? 'flex' : 'none'
-                          }}
-                        >
-                          {sp.photoUrl ? (
-                            <CachedImage 
-                              src={sp.photoUrl} 
-                              alt={sp.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
-                              <User size={subs.length <= 6 ? 18 : 22} className="sm:hidden" />
-                              <User size={24} className="hidden sm:block" />
-                            </div>
-                          )}
-                        </div>
-                        {sp.number && showNumber && (
-                          <div 
-                            className={`absolute bg-indigo-600 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-sm transition-all ${
-                              subs.length <= 6 ? 'w-4 h-4 text-[8px] -top-1 -right-1' : 'w-5 h-5 text-[10px] -top-1 -right-1'
-                            } sm:w-5 sm:h-5 sm:text-[10px] sm:-top-1 sm:-right-1`}
-                            style={{
-                              top: showPhoto ? undefined : '50%',
-                              right: showPhoto ? undefined : '50%',
-                              transform: showPhoto ? 'none' : 'translate(50%, -50%)',
-                              position: showPhoto ? 'absolute' : 'relative',
-                              zIndex: 10
-                            }}
-                          >
-                            {sp.number}
-                          </div>
-                        )}
-                      </div>
-                    <div className={`font-bold text-zinc-900 dark:text-white max-w-[64px] text-center leading-tight transition-all ${
-                      subs.length <= 6 ? 'text-[8px] sm:text-[10px]' : 'text-[9px] sm:text-[10px]'
-                    }`}>
-                      {getVisibleName(sp.name).split(' ').map((part, i) => (
-                        <div key={i} className="truncate">{part}</div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {!isMaximized && !isExporting && (
-          <div className="flex flex-col items-center gap-6 mt-6">
-            {/* Player Count Overview - Moved here as requested */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-2xl border border-indigo-100/50 dark:border-indigo-800/50">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
-                <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">
-                  {starters.length} <span className="opacity-60 ml-0.5">på planen</span>
-                </span>
-              </div>
-              <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-2xl border border-zinc-200 dark:border-zinc-700">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
-                  {subs.length} <span className="opacity-60 ml-0.5">på bänken</span>
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap justify-center items-center gap-3">
-            {/* Primary Action Group: Adding Players */}
-            <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-              <button
-                onClick={() => setPickerMode('starter')}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95"
-                title="Sätt startelva"
-              >
-                <Plus size={18} />
-                <span>Plan</span>
-              </button>
-              <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1" />
-              <button
-                onClick={() => setPickerMode('sub')}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95"
-                title="Hantera bänk"
-              >
-                <Plus size={18} />
-                <span>Bänk</span>
-              </button>
-            </div>
-
-            {/* Mode & Global Actions Group */}
+              {/* Mode & Global Actions Group */}
             <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
               <button
                 onClick={() => setIsEditMode(false)}
@@ -1439,9 +1590,9 @@ export default function LineupBuilder({
               </button>
               <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1" />
               <button
-                onClick={handleExport}
+                onClick={() => setShowPreview(true)}
                 className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95"
-                title="Exportera PNG"
+                title="Förhandsgranska & Exportera"
               >
                 <Download size={20} />
               </button>
@@ -1455,17 +1606,13 @@ export default function LineupBuilder({
             </div>
           </div>
         </div>
-      )}
-      </div>
-
-      {/* Global Controls & Functions - Reorganized at the bottom (Hidden in fullscreen) */}
-      {!isMaximized && (
-        <div className="flex flex-col gap-6 p-6 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+      
+        <div className="flex flex-col gap-4 mt-6">
           {/* Section 1: Formations at the TOP */}
           <div className="flex flex-col gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <Gamepad2 size={16} className="text-zinc-400" />
+                  <Footprints size={16} className="text-zinc-400" />
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Formationer</span>
                 </div>
                 {currentFormation && (
@@ -1546,19 +1693,92 @@ export default function LineupBuilder({
                   className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100 dark:shadow-none"
                 >
                   <Plus size={14} />
-                  <span>Spara ny layout</span>
+                  <span>Spara egen formation</span>
                 </button>
               </div>
           </div>
 
-          {/* Section 2: Layout Options */}
-          <div className="flex flex-col gap-6 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <div className="flex items-center gap-2 px-1">
-              <ClipboardList size={16} className="text-zinc-400" />
-              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Layout</span>
-            </div>
+          {/* Section: Zoom & Scale */}
+          <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <button 
+              onClick={() => setIsZoomExpanded(!isZoomExpanded)}
+              className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Maximize2 size={16} className="text-zinc-400" />
+                <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Zoom & Storlek</span>
+              </div>
+              {isZoomExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+            </button>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+            <motion.div
+              initial={false}
+              animate={{ height: isZoomExpanded ? 'auto' : 0, opacity: isZoomExpanded ? 1 : 0 }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col gap-4 p-5 pt-0">
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-center px-1">
+                    <div className="flex items-center gap-2">
+                       <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Zoom Gränssnitt</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(previewZoom * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.5" 
+                    max="1.5" 
+                    step="0.01" 
+                    value={previewZoom}
+                    onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
+                    className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-center px-1">
+                    <div className="flex items-center gap-2">
+                       <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Spelarstorlek</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(playerScale * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.5" 
+                    max="1.5" 
+                    step="0.05" 
+                    value={playerScale}
+                    onChange={(e) => {
+                      setPlayerScale(parseFloat(e.target.value));
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Section 2: Layout Options */}
+          <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <button 
+              onClick={() => setIsLayoutExpanded(!isLayoutExpanded)}
+              className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ClipboardList size={16} className="text-zinc-400" />
+                <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Layout</span>
+              </div>
+              {isLayoutExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+            </button>
+
+            <motion.div
+              initial={false}
+              animate={{ height: isLayoutExpanded ? 'auto' : 0, opacity: isLayoutExpanded ? 1 : 0 }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col gap-6 p-5 pt-0">
+                <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {/* Theme Style */}
               <div className="flex flex-col gap-2">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tema</span>
@@ -1708,98 +1928,83 @@ export default function LineupBuilder({
                 </div>
               </div>
             </div>
-
-            <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800">
-               <div className="flex justify-between mb-3 px-1">
-                  <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Spelarstorlek</span>
-                  <span className="text-[10px] font-bold text-zinc-500 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-md">{Math.round(playerScale * 100)}%</span>
-               </div>
-               <input 
-                type="range" 
-                min="0.5" 
-                max="1.5" 
-                step="0.05" 
-                value={playerScale}
-                onChange={(e) => {
-                  setPlayerScale(parseFloat(e.target.value));
-                  setHasUnsavedChanges(true);
-                }}
-                className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-              />
-            </div>
           </div>
-        </div>
-      )}
-
-      {!isMaximized && (
+        </motion.div>
+      </div>
+      </div>
+    </>
+    )}
         <div className="mt-12 space-y-6">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Sparade Laguppställningar</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+            <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">Sparade Laguppställningar</h3>
             <button
               onClick={handleCreateNew}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none active:scale-95"
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-lg active:scale-95 w-full sm:w-auto"
             >
               <Plus size={16} />
               <span>Skapa Ny</span>
             </button>
           </div>
 
-          <div className="grid gap-3">
+          <Reorder.Group 
+            axis="y" 
+            values={lineups} 
+            onReorder={onReorderLineups}
+            className="flex flex-col gap-3 w-full"
+          >
             {lineups.length === 0 ? (
               <div className="p-8 text-center bg-white dark:bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
                 <p className="text-zinc-400 font-medium italic">Inga sparade laguppställningar än...</p>
               </div>
             ) : (
               lineups.map(l => (
-                <div 
+                <Reorder.Item 
                   key={l.id}
-                  className={`group p-4 rounded-3xl border transition-all flex items-center justify-between ${
+                  value={l}
+                  className={`group p-4 rounded-3xl border transition-all flex items-center justify-between w-full min-w-0 ${
                     lineup?.id === l.id 
                       ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 ring-1 ring-indigo-200 dark:ring-indigo-800' 
                       : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
                   }`}
                 >
-                  <div className="flex-1 cursor-pointer" onClick={() => onSelectLineup(l.id)}>
-                    <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight">
-                      {l.matchTitle || 'Namnlös Match'}
-                    </h4>
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose">
-                      {new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                  <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+                    <div className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 transition-colors shrink-0">
+                      <GripVertical size={18} />
+                    </div>
+                    <div 
+                      className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
+                      onClick={() => onSelectLineup(l.id)}
+                    >
+                      <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight truncate text-sm sm:text-base">
+                        {l.matchTitle || 'Namnlös Match'}
+                      </h4>
+                      <span className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose truncate block">
+                        {new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
                     <button
                       onClick={() => onCopyLineup(l.id)}
                       className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
                       title="Kopiera"
                     >
-                      <Copy size={18} />
+                      <Copy size={16} />
                     </button>
                     <button
                       onClick={() => onDeleteLineup(l.id)}
                       className="p-2.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
                       title="Radera"
                     >
-                      <Trash2 size={18} />
+                      <Trash2 size={16} />
                     </button>
-                    {lineup?.id !== l.id && (
-                      <button
-                        onClick={() => onSelectLineup(l.id)}
-                        className="ml-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
-                      >
-                        Öppna
-                      </button>
-                    )}
                   </div>
-                </div>
+                </Reorder.Item>
               ))
             )}
-          </div>
+          </Reorder.Group>
         </div>
-      )}
-
-      {/* Overlays / Modals */}
       <AnimatePresence>
         {/* Logo Cropping Modal */}
         {showLogoPicker && logoToCrop && (
@@ -2202,22 +2407,29 @@ export default function LineupBuilder({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
-                    {pickerMode === 'starter' ? 'Välj startelva' : 'Välj bänk'}
-                  </h3>
-                  <div className="flex items-center gap-3 mt-1.5">
-                    <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest leading-none flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                      {starters.length} på planen
-                    </span>
-                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest leading-none flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                      {subs.length} på bänken
-                    </span>
-                  </div>
+                <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-2xl">
+                  <button 
+                    onClick={() => setPickerMode('starter')}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      pickerMode === 'starter' 
+                      ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    På planen ({starters.length})
+                  </button>
+                  <button 
+                    onClick={() => setPickerMode('sub')}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      pickerMode === 'sub' 
+                      ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    På bänken ({subs.length})
+                  </button>
                 </div>
-                <button onClick={() => setPickerMode(null)} className="text-zinc-400 hover:text-zinc-600">
+                <button onClick={() => setPickerMode(null)} className="text-zinc-400 hover:text-zinc-600 p-2">
                   <X size={24} />
                 </button>
               </div>
@@ -2237,14 +2449,14 @@ export default function LineupBuilder({
                       onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
                       className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
                         isCurrentMode 
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20' 
+                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
                           : isOtherMode
-                            ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 select-none cursor-not-allowed'
-                            : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800'
+                            ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors'
+                            : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:border-indigo-300 dark:hover:border-indigo-900/30 transition-colors'
                       }`}
                     >
                       <div className="relative">
-                        <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'grayscale opacity-50' : ''}`}>
+                        <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'opacity-70' : ''}`}>
                           {sp.photoUrl ? (
                             <CachedImage 
                               src={sp.photoUrl} 
@@ -2411,6 +2623,152 @@ export default function LineupBuilder({
                 );
               })()}
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Preview & Export Modal */}
+      <AnimatePresence>
+        {showPreview && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[200] flex flex-col items-center justify-center p-4 sm:p-8"
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-3">
+              <button 
+                onClick={() => setShowPreview(false)}
+                className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all active:scale-90"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="max-w-4xl w-full flex flex-col gap-4 sm:gap-6 max-h-screen overflow-y-auto pt-6 sm:pt-12 pb-24 px-0 sm:px-4 scrollbar-hide">
+              {!isScreenshotMode && (
+                <div className="flex flex-col items-center text-center gap-4 mb-2 sm:mb-4">
+                  <h2 className="text-xl sm:text-2xl font-black text-white">Förhandsgranskning</h2>
+                  
+                  {/* Format Selector */}
+                  <div className="flex p-1 bg-zinc-800/50 rounded-2xl border border-zinc-700 overflow-x-auto max-w-full scrollbar-hide">
+                    <button 
+                      onClick={() => setExportFormat('responsive')}
+                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${exportFormat === 'responsive' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <Maximize2 size={12} className="sm:w-3.5 sm:h-3.5" />
+                      Responsiv
+                    </button>
+                    <button 
+                      onClick={() => setExportFormat('mobile')}
+                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${exportFormat === 'mobile' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <Smartphone size={12} className="sm:w-3.5 sm:h-3.5" />
+                      Mobil
+                    </button>
+                    <button 
+                      onClick={() => setExportFormat('tablet')}
+                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${exportFormat === 'tablet' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <Tablet size={12} className="sm:w-3.5 sm:h-3.5" />
+                      Platta
+                    </button>
+                    <button 
+                      onClick={() => setExportFormat('desktop')}
+                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${exportFormat === 'desktop' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <Monitor size={12} className="sm:w-3.5 sm:h-3.5" />
+                      Dator
+                    </button>
+                  </div>
+                  
+                  {/* Zoom Slider for Preview */}
+                  <div className="flex flex-col items-center gap-2 w-full max-w-xs mt-2">
+                    <div className="flex justify-between w-full px-1">
+                      <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Zoom</span>
+                      <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(previewZoom * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.5" 
+                      max="1.5" 
+                      step="0.01" 
+                      value={previewZoom}
+                      onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
+                  </div>
+
+                  <div className="flex flex-col items-center gap-2 w-full max-w-xs mb-2">
+                    <div className="flex justify-between w-full px-1">
+                      <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Spelarstorlek</span>
+                      <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(playerScale * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.5" 
+                      max="1.5" 
+                      step="0.05" 
+                      value={playerScale}
+                      onChange={(e) => {
+                        setPlayerScale(parseFloat(e.target.value));
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-400"
+                    />
+                  </div>
+                  
+                </div>
+              )}
+
+              {/* The actual export area preview */}
+              <div className={`flex justify-center transition-all ${isScreenshotMode ? 'scale-100 sm:scale-110' : ''}`}>
+                <div className={`${isScreenshotMode ? 'bg-transparent' : 'bg-transparent'} overflow-hidden w-full`} style={{ maxWidth: exportFormat === 'responsive' ? '100%' : exportFormat === 'mobile' ? '375px' : exportFormat === 'tablet' ? '600px' : '900px' }}>
+                  <div className={`origin-top transition-transform ${isScreenshotMode ? 'p-0' : 'p-0 sm:p-4'}`} style={{ transform: previewZoom !== 1 ? `scale(${previewZoom})` : 'none', transformOrigin: 'top center' }}>
+                    {/* Re-rendering the export content in a clean container for display */}
+                    <div className="bg-white dark:bg-zinc-900 sm:rounded-3xl shadow-xl sm:border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                      {renderLineupContent(true, isScreenshotMode ? undefined : exportRef)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 flex flex-col sm:flex-row items-center gap-3 sm:gap-4 z-[210] w-full px-4 sm:w-auto ${isScreenshotMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`}>
+                {!isScreenshotMode ? (
+                  <>
+                    <button
+                      onClick={() => setIsScreenshotMode(true)}
+                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-4 bg-white text-zinc-900 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all active:scale-95 shadow-xl hover:bg-zinc-100"
+                    >
+                      <Camera size={18} />
+                      <span>Skärmklippsläge</span>
+                    </button>
+                    <button
+                      onClick={handleExport}
+                      disabled={isExporting}
+                      className={`w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 rounded-2xl font-black uppercase text-sm tracking-widest transition-all active:scale-95 shadow-xl ${
+                        isExporting 
+                          ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' 
+                          : 'bg-indigo-600 text-white hover:bg-indigo-500 hover:scale-105'
+                      }`}
+                    >
+                      {isExporting ? <RotateCcw size={20} className="animate-spin" /> : <Download size={20} />}
+                      <span>{isExporting ? 'Skapar...' : 'Ladda ner'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setIsScreenshotMode(false)}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-4 bg-zinc-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest transition-all active:scale-95 shadow-2xl border border-zinc-800"
+                  >
+                    <RotateCcw size={18} />
+                    <span>Tillbaka</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Removed tooltip to avoid it appearing in screenshots */}
           </motion.div>
         )}
       </AnimatePresence>

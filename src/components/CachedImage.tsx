@@ -1,17 +1,22 @@
 
 import React, { useState, useEffect } from 'react';
+import { User } from 'lucide-react';
 import { getCachedImage, cacheImage } from '../lib/imageCache';
+
+// Global memory cache to share across instances (crucial for export view)
+const memoryCache: Record<string, string> = {};
 
 interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src: string;
 }
 
-export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, ...props }) => {
-  const [displaySrc, setDisplaySrc] = useState<string | null>(null);
+export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, crossOrigin = 'anonymous', ...props }) => {
+  // Initialize from memory cache synchronously if possible
+  const [displaySrc, setDisplaySrc] = useState<string | null>(memoryCache[src] || null);
+  const [useCors, setUseCors] = useState(crossOrigin === 'anonymous');
 
   useEffect(() => {
     let isMounted = true;
-    let objectUrlToRevoke: string | null = null;
 
     const loadImage = async () => {
       // Don't try to cache data URLs or already blob URLs
@@ -20,30 +25,85 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, .
         return;
       }
 
-      // Check cache
-      const cached = await getCachedImage(src);
-      if (cached && isMounted) {
-        setDisplaySrc(cached);
-        objectUrlToRevoke = cached;
+      // 1. Check Memory Cache First (Fastest)
+      if (memoryCache[src]) {
+        if (isMounted) {
+          setDisplaySrc(memoryCache[src]);
+          setUseCors(true);
+        }
         return;
       }
 
-      // If not in cache, fetch and cache
+      // 2. Check IndexedDB Cache
       try {
-        const response = await fetch(src);
+        const cachedBlob = await getCachedImage(src);
+        if (cachedBlob && isMounted) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (isMounted && typeof reader.result === 'string') {
+              if (reader.result.length > 500) {
+                memoryCache[src] = reader.result;
+                setDisplaySrc(reader.result);
+                setUseCors(true);
+              } else {
+                setDisplaySrc(src);
+                setUseCors(false);
+              }
+            }
+          };
+          reader.readAsDataURL(cachedBlob);
+          return;
+        }
+      } catch (e) {
+        console.warn('Cache lookup failed', e);
+      }
+
+      // 3. If not in cache, fetch and cache
+      try {
+        let response: Response | null = null;
+        
+        try {
+          response = await fetch(src, { 
+            cache: 'default',
+            mode: 'cors',
+            credentials: 'omit'
+          });
+        } catch (fetchErr) {
+          // Silent proceed to proxy
+        }
+        
+        if (!response || !response.ok) {
+          response = await fetch(`/api/proxy?url=${encodeURIComponent(src)}`, { 
+            cache: 'default'
+          });
+        }
+        
+        if (!response.ok) throw new Error(`Fetch failed`);
+        
         const blob = await response.blob();
         
         if (isMounted) {
-          const blobUrl = URL.createObjectURL(blob);
-          setDisplaySrc(blobUrl);
-          objectUrlToRevoke = blobUrl;
-          
-          // Cache it for next time
-          await cacheImage(src, blob);
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (isMounted && typeof reader.result === 'string') {
+              if (reader.result.length > 500) {
+                memoryCache[src] = reader.result;
+                setDisplaySrc(reader.result);
+                setUseCors(true);
+                cacheImage(src, blob).catch(() => {});
+              } else {
+                setDisplaySrc(src);
+                setUseCors(false);
+              }
+            }
+          };
+          reader.readAsDataURL(blob);
         }
       } catch (err) {
-        console.error('Failed to load image for caching', err);
-        if (isMounted) setDisplaySrc(src); // Fallback to direct URL
+        if (isMounted) {
+          setDisplaySrc(src);
+          setUseCors(false);
+        }
       }
     };
 
@@ -51,16 +111,28 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, .
 
     return () => {
       isMounted = false;
-      if (objectUrlToRevoke) {
-        URL.revokeObjectURL(objectUrlToRevoke);
-      }
     };
-  }, [src]);
+  }, [src, crossOrigin]);
 
-  if (!displaySrc) {
-    // Return a placeholder or the same img with the original src to let native loading happen while we wait for cache
-    return <img src={src} className={className} alt={alt} {...props} />;
+  const [loadError, setLoadError] = useState(false);
+  const { crossOrigin: _excluded, ...cleanProps } = props;
+  const finalCrossOrigin = useCors ? 'anonymous' : undefined;
+
+  // IMPORTANT: For Data URLs, crossOrigin should be omitted
+  const isLocal = displaySrc?.startsWith('data:');
+
+  if (!displaySrc || loadError) {
+    return <div className={`${className} bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400`}><User size={20} /></div>;
   }
 
-  return <img src={displaySrc} className={className} alt={alt} {...props} />;
+  return (
+    <img 
+      src={displaySrc} 
+      className={className} 
+      alt={alt} 
+      crossOrigin={isLocal ? undefined : finalCrossOrigin} 
+      {...cleanProps} 
+      onError={() => setLoadError(true)}
+    />
+  );
 };

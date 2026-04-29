@@ -430,7 +430,7 @@ function MomentItem({
                       onChange={(e) => updateMoment(moment.id, { exerciseId: e.target.value || undefined })}
                       className="appearance-none bg-transparent text-[10px] font-bold text-zinc-500 px-3 py-1 pr-8 rounded-lg focus:ring-0 cursor-pointer max-w-[150px] truncate uppercase tracking-wider border-none"
                     >
-                      <option value="">Ingen koppling...</option>
+                      <option value="">Ingen tävling...</option>
                       {exercises.map(ex => (
                         <option key={ex.id} value={ex.id}>{ex.name}</option>
                       ))}
@@ -871,7 +871,7 @@ export default function SessionEditor({
                 }`}
               >
                 <Users size={12} />
-                Deltagare
+                Deltagare ({session.attendance?.length || 0})
               </button>
             </div>
           </div>

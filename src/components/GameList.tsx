@@ -60,34 +60,34 @@ export default function GameList({
 
   return (
     <div className="w-full max-w-4xl mx-auto sm:p-6 pb-32">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 px-4 sm:px-0 pt-4 sm:pt-0">
-        <div className="flex p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-full sm:w-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 px-4 sm:px-0 pt-1 sm:pt-0">
+        <div className="flex p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-full sm:w-auto">
           <button
             onClick={() => setFilter('all')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
               filter === 'all'
                 ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
             }`}
           >
             Alla ({exercises.length})
           </button>
           <button
             onClick={() => setFilter('standalone')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
               filter === 'standalone'
                 ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
             }`}
           >
             Fristående ({standaloneCount})
           </button>
           <button
             onClick={() => setFilter('linked')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
               filter === 'linked'
                 ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
             }`}
           >
             Kopplade ({linkedCount})
