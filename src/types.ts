@@ -12,6 +12,7 @@ export interface LineupPlayer {
   x: number; // 0-100 percent
   y: number; // 0-100 percent
   isSubstitute: boolean;
+  isHolding?: boolean;
 }
 
 export interface Lineup {

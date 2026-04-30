@@ -1690,6 +1690,8 @@ export default function App() {
                   {(activeExercise.sortByScore 
                     ? [...activeExercise.teams].sort((a, b) => b.score - a.score)
                     : activeExercise.teams
+                  ).filter((team, index, self) => 
+                    index === self.findIndex((t) => t.id === team.id)
                   ).map((team) => (
                     <motion.div 
                       layout
@@ -1882,7 +1884,7 @@ export default function App() {
                   className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
                 >
                   <option value="">Ingen tävling (endast arkiv)</option>
-                  {periods.filter(p => !p.endDate).map(p => (
+                  {Array.from(new Map<string, Period>(periods.filter(p => !p.endDate).map(p => [p.id, p])).values()).map((p: Period) => (
                     <option key={p.id} value={p.id}>
                       {p.name} {p.isActive ? '(Aktiv)' : ''}
                     </option>
