@@ -13,6 +13,11 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Health check endpoint
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   // Proxy endpoint to bypass CORS for image exports
   app.get('/api/proxy', async (req, res) => {
     const { url } = req.query;
@@ -62,4 +67,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

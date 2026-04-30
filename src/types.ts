@@ -28,6 +28,7 @@ export interface Lineup {
   formation?: string;
   showPhoto?: boolean;
   showNumber?: boolean;
+  isArchived?: boolean;
   teamLogoUrl?: string;
   pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass';
   tacticalBoard?: {

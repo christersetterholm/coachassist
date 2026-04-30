@@ -1,15 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { toPng } from 'html-to-image';
 // import html2canvas from 'html-to-image'; // Removed
 import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, GripVertical, Footprints } from 'lucide-react';
+import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, GripVertical, Footprints, Archive, ArchiveRestore } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
+
+import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -36,6 +39,85 @@ const EXPORT_FORMATS = {
   tablet: { width: 1536, height: 2048, label: 'iPad' },
   desktop: { width: 2560, height: 1664, label: 'MacBook' }
 };
+
+interface LineupReorderItemProps {
+  key: string;
+  l: Lineup;
+  activeLineupId?: string;
+  onSelectLineup: (id: string) => void;
+  toggleArchive: (e: any, id: string) => void;
+  onCopyLineup: (id: string) => void;
+  onDeleteLineup: (id: string) => void;
+}
+
+function LineupReorderItem({ 
+  l, 
+  activeLineupId, 
+  onSelectLineup, 
+  toggleArchive, 
+  onCopyLineup, 
+  onDeleteLineup 
+}: LineupReorderItemProps) {
+  const controls = useDragControls();
+
+  return (
+    <Reorder.Item 
+      key={l.id}
+      value={l}
+      dragListener={false}
+      dragControls={controls}
+      className={`group p-4 rounded-3xl border transition-all flex items-center justify-between w-full min-w-0 ${
+        activeLineupId === l.id 
+          ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 ring-1 ring-indigo-200 dark:ring-indigo-800' 
+          : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+      }`}
+    >
+      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+        <div 
+          className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 transition-colors shrink-0 p-2 -m-2 touch-none"
+          onPointerDown={(e) => controls.start(e)}
+        >
+          <GripVertical size={18} />
+        </div>
+        <div 
+          className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
+          onClick={() => onSelectLineup(l.id)}
+        >
+          <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight truncate text-sm sm:text-base">
+            {l.matchTitle || 'Namnlös Match'}
+          </h4>
+          <span className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose truncate block">
+            {new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1 shrink-0 ml-2">
+        <button
+          onClick={(e) => toggleArchive(e, l.id)}
+          className="p-2.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+          title="Arkivera"
+        >
+          <Archive size={16} />
+        </button>
+        <button
+          onClick={() => onCopyLineup(l.id)}
+          className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+          title="Kopiera"
+        >
+          <Copy size={16} />
+        </button>
+        <button
+          onClick={() => onDeleteLineup(l.id)}
+          className="p-2.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+          title="Radera"
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </Reorder.Item>
+  );
+}
 
 export default function LineupBuilder({ 
   squad, 
@@ -88,7 +170,9 @@ export default function LineupBuilder({
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
+  const sessionToken = useMemo(() => Math.random().toString(36).substring(7), []);
 
   // Tactical Board State
   const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'eraser' | 'ball' | 'opponent'>('pen');
@@ -110,6 +194,7 @@ export default function LineupBuilder({
     // Check for double tap
     const now = Date.now();
     if (now - lastTapTime.current < 300) {
+      pushHistory();
       if (type === 'opponent' && id) {
         setOpponents(prev => prev.filter(o => o.id !== id));
       } else if (type === 'ball') {
@@ -123,6 +208,7 @@ export default function LineupBuilder({
 
     // Direct eraser check
     if (tacticalTool === 'eraser') {
+      pushHistory();
       if (type === 'opponent' && id) {
         setOpponents(prev => prev.filter(o => o.id !== id));
       } else if (type === 'ball') {
@@ -134,6 +220,7 @@ export default function LineupBuilder({
 
     // Long press detection
     longPressTimer.current = setTimeout(() => {
+      pushHistory();
       if (type === 'opponent' && id) {
         setOpponents(prev => prev.filter(o => o.id !== id));
       } else if (type === 'ball') {
@@ -172,6 +259,199 @@ export default function LineupBuilder({
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lineupHistories, setLineupHistories] = useState<Record<string, any[]>>({});
+  const [lineupFutures, setLineupFutures] = useState<Record<string, any[]>>({});
+  const isRestoringHistory = useRef(false);
+  const skipHistoryRemoteUpdate = useRef(false);
+
+  const currentId = lineup?.id || 'temp';
+  const history = lineupHistories[currentId] || [];
+  const future = lineupFutures[currentId] || [];
+
+  // Sync history with Firestore if user is logged in
+  useEffect(() => {
+    if (!user || !lineup?.id) return;
+
+    const historyDocRef = doc(db, 'users', user.uid, 'lineup_history', lineup.id);
+    
+    const unsubscribe = onSnapshot(historyDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.lastUpdatedBy === sessionToken) {
+          // We caused this update, skip
+          return;
+        }
+        
+        // Block local updates while we apply remote history
+        skipHistoryRemoteUpdate.current = true;
+        if (data.history) setLineupHistories(prev => ({ ...prev, [lineup.id]: data.history }));
+        if (data.future) setLineupFutures(prev => ({ ...prev, [lineup.id]: data.future }));
+        setTimeout(() => { skipHistoryRemoteUpdate.current = false; }, 100);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user, lineup?.id, sessionToken]);
+
+  // Push history to Cloud (debounced)
+  useEffect(() => {
+    if (!user || !lineup?.id || skipHistoryRemoteUpdate.current) return;
+    
+    const h = lineupHistories[lineup.id] || [];
+    const f = lineupFutures[lineup.id] || [];
+
+    const syncHistory = async () => {
+      const historyDocRef = doc(db, 'users', user.uid, 'lineup_history', lineup.id);
+      try {
+        await setDoc(historyDocRef, {
+          history: h,
+          future: f,
+          updatedAt: Date.now(),
+          lastUpdatedBy: sessionToken
+        }, { merge: true });
+      } catch (e) {
+        console.error("Error syncing history to cloud:", e);
+      }
+    };
+
+    const timeout = setTimeout(syncHistory, 2000); // 2s debounce for history sync
+    return () => clearTimeout(timeout);
+  }, [lineupHistories, lineupFutures, user, lineup?.id]);
+
+  const pushHistory = useCallback(() => {
+    setLineupHistories(prev => {
+      const currentHistory = prev[currentId] || [];
+      const snapshot = {
+        lineupName,
+        teamName,
+        playerScale,
+        nameTagStyle,
+        nameDisplayMode,
+        showNameBackground,
+        nameBackgroundType,
+        showPhoto,
+        showNumber,
+        teamLogoUrl,
+        pitchType,
+        players: JSON.parse(JSON.stringify(players)),
+        footballPos: footballPos ? { ...footballPos } : null,
+        opponents: JSON.parse(JSON.stringify(opponents)),
+        tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
+        showOpponents,
+        formation: currentFormation
+      };
+      const newHistory = [...currentHistory, snapshot];
+      if (newHistory.length > 50) return { ...prev, [currentId]: newHistory.slice(newHistory.length - 50) };
+      return { ...prev, [currentId]: newHistory };
+    });
+    setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+
+  const handleUndo = useCallback(() => {
+    if (history.length === 0) return;
+    
+    // Save current state to future before undoing
+    const currentSnapshot = {
+      lineupName,
+      teamName,
+      playerScale,
+      nameTagStyle,
+      nameDisplayMode,
+      showNameBackground,
+      nameBackgroundType,
+      showPhoto,
+      showNumber,
+      teamLogoUrl,
+      pitchType,
+      players: JSON.parse(JSON.stringify(players)),
+      footballPos: footballPos ? { ...footballPos } : null,
+      opponents: JSON.parse(JSON.stringify(opponents)),
+      tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
+      showOpponents,
+      formation: currentFormation
+    };
+    
+    const last = history[history.length - 1];
+    setLineupHistories(prev => ({ ...prev, [currentId]: prev[currentId].slice(0, prev[currentId].length - 1) }));
+    setLineupFutures(prev => ({ ...prev, [currentId]: [currentSnapshot, ...(prev[currentId] || [])] }));
+    
+    isRestoringHistory.current = true;
+    
+    setLineupName(last.lineupName);
+    setTeamName(last.teamName);
+    setPlayerScale(last.playerScale);
+    setNameTagStyle(last.nameTagStyle);
+    setNameDisplayMode(last.nameDisplayMode);
+    setShowNameBackground(last.showNameBackground);
+    setNameBackgroundType(last.nameBackgroundType);
+    setShowPhoto(last.showPhoto);
+    setShowNumber(last.showNumber);
+    setTeamLogoUrl(last.teamLogoUrl);
+    setPitchType(last.pitchType);
+    setPlayers(last.players);
+    setFootballPos(last.footballPos);
+    setOpponents(last.opponents);
+    setTacticalDrawings(last.tacticalDrawings);
+    setShowOpponents(last.showOpponents);
+    setCurrentFormation(last.formation);
+    setHasUnsavedChanges(true);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+
+  const handleRedo = useCallback(() => {
+    if (future.length === 0) return;
+    
+    // Save current state to history before redoing
+    const currentSnapshot = {
+      lineupName,
+      teamName,
+      playerScale,
+      nameTagStyle,
+      nameDisplayMode,
+      showNameBackground,
+      nameBackgroundType,
+      showPhoto,
+      showNumber,
+      teamLogoUrl,
+      pitchType,
+      players: JSON.parse(JSON.stringify(players)),
+      footballPos: footballPos ? { ...footballPos } : null,
+      opponents: JSON.parse(JSON.stringify(opponents)),
+      tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
+      showOpponents,
+      formation: currentFormation
+    };
+    
+    const next = future[0];
+    setLineupFutures(prev => ({ ...prev, [currentId]: prev[currentId].slice(1) }));
+    setLineupHistories(prev => ({ ...prev, [currentId]: [...(prev[currentId] || []), currentSnapshot] }));
+    
+    isRestoringHistory.current = true;
+    
+    setLineupName(next.lineupName);
+    setTeamName(next.teamName);
+    setPlayerScale(next.playerScale);
+    setNameTagStyle(next.nameTagStyle);
+    setNameDisplayMode(next.nameDisplayMode);
+    setShowNameBackground(next.showNameBackground);
+    setNameBackgroundType(next.nameBackgroundType);
+    setShowPhoto(next.showPhoto);
+    setShowNumber(next.showNumber);
+    setTeamLogoUrl(next.teamLogoUrl);
+    setPitchType(next.pitchType);
+    setPlayers(next.players);
+    setFootballPos(next.footballPos);
+    setOpponents(next.opponents);
+    setTacticalDrawings(next.tacticalDrawings);
+    setShowOpponents(next.showOpponents);
+    setCurrentFormation(next.formation);
+    setHasUnsavedChanges(true);
+  }, [currentId, future, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+
+  const handleSelectLineupWithHistory = useCallback((id: string) => {
+    if (id === lineup?.id) return;
+    onSelectLineup(id);
+  }, [lineup?.id, onSelectLineup]);
+
   const fieldRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -183,18 +463,21 @@ export default function LineupBuilder({
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
     if (tacticalTool === 'ball') {
+      pushHistory();
       setFootballPos({ x, y });
       setDraggingBall(true);
       return;
     }
 
     if (tacticalTool === 'opponent') {
+      pushHistory();
       const newOpponent = { id: Math.random().toString(36).substr(2, 9), x, y };
       setOpponents(prev => [...prev, newOpponent]);
       return;
     }
 
     if (tacticalTool === 'eraser') {
+      pushHistory();
       // Find and remove clicked drawing
       setTacticalDrawings(prev => prev.filter(d => {
         return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 3);
@@ -241,6 +524,7 @@ export default function LineupBuilder({
   const handleTacticalEnd = () => {
     if (isDrawing) {
       if (currentPath.length > 1) {
+        pushHistory();
         setTacticalDrawings(prev => [...prev, {
           id: Math.random().toString(36).substr(2, 9),
           type: tacticalTool,
@@ -482,6 +766,7 @@ export default function LineupBuilder({
         if (isInFieldX && isInFieldY) {
           // Drop on field
           // If it was a sub, make it a starter, otherwise just update position
+          pushHistory();
           setPlayers(prev => prev.map(p => 
             p.id === draggingId 
               ? { ...p, isSubstitute: false, x: dragPos.x, y: dragPos.y } 
@@ -489,6 +774,7 @@ export default function LineupBuilder({
           ));
         } else {
           // Drop outside field (assume bench)
+          pushHistory();
           setPlayers(prev => prev.map(p => 
             p.id === draggingId ? { ...p, isSubstitute: true } : p
           ));
@@ -508,6 +794,10 @@ export default function LineupBuilder({
   }, [draggingId, dragPos]);
 
   useEffect(() => {
+    if (isRestoringHistory.current) {
+      isRestoringHistory.current = false;
+      return;
+    }
     if (lineup) {
       setLineupName(prev => {
         if (prev !== lineup.matchTitle) return lineup.matchTitle;
@@ -679,6 +969,7 @@ export default function LineupBuilder({
   }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, lineup?.id]);
 
   const applyFormation = (variant: FormationVariant) => {
+    pushHistory();
     setCurrentFormation(variant.name);
 
     const onField = starters;
@@ -763,6 +1054,17 @@ export default function LineupBuilder({
     setHasUnsavedChanges(true);
   };
 
+  const toggleArchive = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const targetLineup = lineups.find(l => l.id === id);
+    if (targetLineup) {
+      onUpdateLineup({
+        ...targetLineup,
+        isArchived: !targetLineup.isArchived
+      });
+    }
+  };
+
   const handleSave = () => {
     setIsEditingTitle(false);
   };
@@ -837,6 +1139,7 @@ export default function LineupBuilder({
   const togglePlayerInLineup = (playerId: string, isSubstitute: boolean) => {
     const existingPlayer = players.find(p => p.playerId === playerId);
     
+    pushHistory();
     if (existingPlayer) {
       // If it exists but with different status, update status
       if (existingPlayer.isSubstitute !== isSubstitute) {
@@ -862,6 +1165,7 @@ export default function LineupBuilder({
   };
 
   const updatePlayerPosition = (id: string, x: number, y: number) => {
+    pushHistory();
     setPlayers(prev => prev.map(p => {
       if (p.id === id) {
         return { ...p, x, y };
@@ -872,6 +1176,7 @@ export default function LineupBuilder({
   };
 
   const toggleSubstitute = (id: string) => {
+    pushHistory();
     setPlayers(prev => prev.map(p => 
       p.id === id ? { ...p, isSubstitute: !p.isSubstitute } : p
     ));
@@ -879,6 +1184,7 @@ export default function LineupBuilder({
   };
 
   const removePlayer = (id: string) => {
+    pushHistory();
     setPlayers(prev => prev.filter(p => p.id !== id));
     setSelectedForEdit(null);
     setHasUnsavedChanges(true);
@@ -1283,10 +1589,10 @@ export default function LineupBuilder({
 
         {/* Bench Area */}
         <div className="bench-container mb-0">
-          <div className={`p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
+          <div className={`p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
             subs.length > 6 
-              ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-3 sm:gap-4' 
-              : 'flex flex-wrap justify-center gap-2 sm:gap-4'
+              ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
+              : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
           }`}>
             {subs.length === 0 ? (
               <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
@@ -1533,45 +1839,45 @@ export default function LineupBuilder({
 
         {!isMaximized && (
           <>
-            <div className="flex flex-col items-center gap-6 mt-6">
+            <div className="flex flex-col items-center gap-2 mt-1">
             {/* Consolidated Player Controls */}
-            <div className="flex flex-wrap justify-center items-center gap-3">
+            <div className="flex flex-wrap sm:flex-nowrap justify-center items-center gap-2">
               <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                 <button
                   onClick={() => setPickerMode('starter')}
-                  className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2.5 bg-white dark:bg-zinc-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95 group"
+                  className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-zinc-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[9px] uppercase shadow-sm active:scale-95 group whitespace-nowrap"
                   title="Hantera startelva"
                 >
-                  <div className="flex items-center gap-1 sm:gap-2">
-                    <span>På planen ({starters.length})</span>
+                  <div className="flex items-center shrink-0">
+                    <span className="whitespace-nowrap">På planen ({starters.length})</span>
                   </div>
-                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800" />
-                  <Plus size={14} className="group-hover:scale-110 transition-transform" />
+                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+                  <Plus size={12} className="group-hover:scale-110 transition-transform shrink-0" />
                 </button>
 
-                <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5 sm:mx-1" />
+                <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5 sm:mx-1 shrink-0" />
 
                 <button
                   onClick={() => setPickerMode('sub')}
-                  className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2.5 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm active:scale-95 group"
+                  className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[9px] uppercase shadow-sm active:scale-95 group whitespace-nowrap"
                   title="Hantera bänk"
                 >
-                  <div className="flex items-center gap-1 sm:gap-2">
-                    <span>På bänken ({subs.length})</span>
+                  <div className="flex items-center shrink-0">
+                    <span className="whitespace-nowrap">På bänken ({subs.length})</span>
                   </div>
-                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800" />
-                  <Plus size={14} className="group-hover:scale-110 transition-transform" />
+                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+                  <Plus size={12} className="group-hover:scale-110 transition-transform shrink-0" />
                 </button>
               </div>
 
               {/* Mode & Global Actions Group */}
-            <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex-nowrap overflow-x-auto no-scrollbar">
               <button
                 onClick={() => setIsEditMode(false)}
-                className={`p-2.5 rounded-xl transition-all ${
+                className={`p-2.5 rounded-xl transition-all shrink-0 ${
                   !isEditMode 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-transparent'
                 }`}
                 title="Flytta spelare"
               >
@@ -1579,26 +1885,50 @@ export default function LineupBuilder({
               </button>
               <button
                 onClick={() => setIsEditMode(true)}
-                className={`p-2.5 rounded-xl transition-all ${
+                className={`p-2.5 rounded-xl transition-all shrink-0 ${
                   isEditMode 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-transparent'
                 }`}
                 title="Redigera spelare"
               >
                 <Edit2 size={20} />
               </button>
-              <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1" />
+              <button
+                onClick={handleUndo}
+                disabled={history.length === 0}
+                className={`p-2.5 rounded-xl transition-all shrink-0 ${
+                  history.length === 0 
+                    ? 'text-zinc-300 dark:text-zinc-700 cursor-not-allowed opacity-50 border border-transparent' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-95'
+                }`}
+                title="Ångra"
+              >
+                <Undo2 size={20} />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={future.length === 0}
+                className={`p-2.5 rounded-xl transition-all shrink-0 ${
+                  future.length === 0 
+                    ? 'text-zinc-300 dark:text-zinc-700 cursor-not-allowed opacity-50 border border-transparent' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-95'
+                }`}
+                title="Gör om"
+              >
+                <Redo2 size={20} />
+              </button>
+              <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1 shrink-0" />
               <button
                 onClick={() => setShowPreview(true)}
-                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95"
+                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
                 title="Förhandsgranska & Exportera"
               >
                 <Download size={20} />
               </button>
               <button
                 onClick={() => setIsMaximized(!isMaximized)}
-                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95"
+                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
                 title={isMaximized ? "Lämna fullskärm" : "Fullskärm"}
               >
                 {isMaximized ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
@@ -1948,62 +2278,105 @@ export default function LineupBuilder({
 
           <Reorder.Group 
             axis="y" 
-            values={lineups} 
-            onReorder={onReorderLineups}
+            values={lineups.filter(l => !l.isArchived)} 
+            onReorder={(reordered) => {
+              const archived = lineups.filter(l => l.isArchived);
+              onReorderLineups([...reordered, ...archived]);
+            }}
             className="flex flex-col gap-3 w-full"
           >
-            {lineups.length === 0 ? (
+            {lineups.filter(l => !l.isArchived).length === 0 ? (
               <div className="p-8 text-center bg-white dark:bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
                 <p className="text-zinc-400 font-medium italic">Inga sparade laguppställningar än...</p>
               </div>
             ) : (
-              lineups.map(l => (
-                <Reorder.Item 
+              lineups.filter(l => !l.isArchived).map(l => (
+                <LineupReorderItem
                   key={l.id}
-                  value={l}
-                  className={`group p-4 rounded-3xl border transition-all flex items-center justify-between w-full min-w-0 ${
-                    lineup?.id === l.id 
-                      ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 ring-1 ring-indigo-200 dark:ring-indigo-800' 
-                      : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
-                    <div className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 transition-colors shrink-0">
-                      <GripVertical size={18} />
-                    </div>
-                    <div 
-                      className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
-                      onClick={() => onSelectLineup(l.id)}
-                    >
-                      <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight truncate text-sm sm:text-base">
-                        {l.matchTitle || 'Namnlös Match'}
-                      </h4>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose truncate block">
-                        {new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <button
-                      onClick={() => onCopyLineup(l.id)}
-                      className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-                      title="Kopiera"
-                    >
-                      <Copy size={16} />
-                    </button>
-                    <button
-                      onClick={() => onDeleteLineup(l.id)}
-                      className="p-2.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-                      title="Radera"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </Reorder.Item>
+                  l={l}
+                  activeLineupId={lineup?.id}
+                  onSelectLineup={handleSelectLineupWithHistory}
+                  toggleArchive={toggleArchive}
+                  onCopyLineup={onCopyLineup}
+                  onDeleteLineup={onDeleteLineup}
+                />
               ))
             )}
           </Reorder.Group>
+
+          {/* Archived Lineups Section */}
+          {lineups.some(l => l.isArchived) && (
+            <div className="pt-4 mt-8 border-t border-zinc-100 dark:border-zinc-800">
+              <button 
+                onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                className="flex items-center justify-between w-full px-4 py-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <Archive size={18} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
+                  <span className="text-sm font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
+                    Arkiverade ({lineups.filter(l => l.isArchived).length})
+                  </span>
+                </div>
+                {isArchiveExpanded ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+              </button>
+
+              <AnimatePresence>
+                {isArchiveExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex flex-col gap-3 w-full mt-4">
+                      {lineups.filter(l => l.isArchived).map(l => (
+                        <div 
+                          key={l.id}
+                          className="group p-4 bg-white/50 dark:bg-zinc-900/30 rounded-3xl border border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
+                        >
+                          <div 
+                            className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
+                            onClick={() => handleSelectLineupWithHistory(l.id)}
+                          >
+                            <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-sm">
+                              {l.matchTitle || 'Namnlös Match'}
+                            </h4>
+                            <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-loose truncate block">
+                              Arkiverad
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              onClick={(e) => toggleArchive(e, l.id)}
+                              className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
+                              title="Återställ"
+                            >
+                              <ArchiveRestore size={16} />
+                            </button>
+                            <button
+                              onClick={() => onCopyLineup(l.id)}
+                              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg transition-all"
+                              title="Kopiera"
+                            >
+                              <Copy size={16} />
+                            </button>
+                            <button
+                              onClick={() => onDeleteLineup(l.id)}
+                              className="p-2 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all"
+                              title="Radera"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
       <AnimatePresence>
         {/* Logo Cropping Modal */}

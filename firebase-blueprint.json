@@ -56,6 +56,16 @@
         "pinnedFormationIds": { "type": "array" },
         "updatedAt": { "type": "number" }
       }
+    },
+    "LineupHistory": {
+      "title": "Lineup History",
+      "description": "Persistence for undo/redo stacks per lineup.",
+      "type": "object",
+      "properties": {
+        "history": { "type": "array" },
+        "future": { "type": "array" },
+        "updatedAt": { "type": "number" }
+      }
     }
   },
   "firestore": {
@@ -66,6 +76,10 @@
     "/users/{userId}/config/state": {
       "schema": "UserData",
       "description": "The synchronized state for a coach."
+    },
+    "/users/{userId}/lineup_history/{lineupId}": {
+      "schema": "LineupHistory",
+      "description": "Undo/Redo history for a specific lineup."
     }
   }
 }
