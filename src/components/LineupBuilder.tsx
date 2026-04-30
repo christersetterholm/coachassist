@@ -6,7 +6,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -171,6 +171,8 @@ export default function LineupBuilder({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isControlsVisible, setIsControlsVisible] = useState(true);
+  const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
@@ -258,6 +260,7 @@ export default function LineupBuilder({
   const [exportFormat, setExportFormat] = useState<'responsive' | 'mobile' | 'tablet' | 'desktop'>('mobile');
   const [isScreenshotMode, setIsScreenshotMode] = useState(false);
   const [showFormationModal, setShowFormationModal] = useState(false);
+  const [showOpponentFormationModal, setShowOpponentFormationModal] = useState(false);
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -316,7 +319,7 @@ export default function LineupBuilder({
       }
     };
 
-    const timeout = setTimeout(syncHistory, 2000); // 2s debounce for history sync
+    const timeout = setTimeout(syncHistory, 3000); // 3s debounce for history sync (increased from 2s)
     return () => clearTimeout(timeout);
   }, [lineupHistories, lineupFutures, user, lineup?.id]);
 
@@ -733,94 +736,114 @@ export default function LineupBuilder({
     }
   }, [lineupName, teamName, exportFormat]);
 
-  // Global listeners for dragging
+  // Status state for better persistence indicators
+  const [isSyncingToParent, setIsSyncingToParent] = useState(false);
+
+  // Use refs for dragging to keep event listeners stable and avoid re-binding performance hits
+  const dragInfoRef = useRef<{ id: string; x: number; y: number; hoveredId: string | null } | null>(null);
+  const lastInteractionTimeRef = useRef<number>(0);
+
+  // Global listeners for dragging - Optimized for performance
   useEffect(() => {
-    if (!draggingId) return;
+    if (!draggingId) {
+      dragInfoRef.current = null;
+      return;
+    }
+
+    // Initialize drag info
+    const initialPlayer = players.find(p => p.id === draggingId);
+    if (initialPlayer) {
+      dragInfoRef.current = { 
+        id: draggingId, 
+        x: initialPlayer.x, 
+        y: initialPlayer.y, 
+        hoveredId: null 
+      };
+    }
 
     const handlePointerMove = (e: PointerEvent) => {
-      if (!fieldRef.current) return;
+      if (!fieldRef.current || !dragInfoRef.current) return;
       
       const rect = fieldRef.current.getBoundingClientRect();
       const rawX = ((e.clientX - rect.left) / rect.width) * 100;
       const rawY = ((e.clientY - rect.top) / rect.height) * 100;
 
       // Clamped coordinates for the "ghost" position on field
-      let x = Math.max(2, Math.min(98, rawX));
-      let y = Math.max(2, Math.min(98, rawY));
-
-      // Snapping
-      const snapStep = 0.1;
-      x = Number((Math.round(x / snapStep) * snapStep).toFixed(2));
-      y = Number((Math.round(y / snapStep) * snapStep).toFixed(2));
+      // Use 2 decimal places to avoid jitter and excessive state updates
+      const x = Number(Math.max(2, Math.min(98, rawX)).toFixed(2));
+      const y = Number(Math.max(2, Math.min(98, rawY)).toFixed(2));
 
       // Swap detection: Find closest starter player within radius
-      // We use raw coordinates to prevent premature snapping when pointer is far from the field
       let closestId = null;
-      let checkRadius = 8; // Tighter radius for more intentional swaps
+      let minDistance = 4; // Further reduced radius (from 6) to avoid accidental "sucking"
 
       players.forEach(p => {
-        // Don't target self and only target starters
         if (p.id === draggingId || p.isSubstitute) return;
         
         const dx = rawX - p.x;
         const dy = rawY - p.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         
-        if (dist < checkRadius) {
-          checkRadius = dist;
+        if (dist < minDistance) {
+          minDistance = dist;
           closestId = p.id;
         }
       });
 
-      setHoveredPlayerId(closestId);
+      // Update ref and state
+      dragInfoRef.current.x = x;
+      dragInfoRef.current.y = y;
+      dragInfoRef.current.hoveredId = closestId;
+      
+      // Update visual states for rendering
       setDragPos({ x, y });
+      setHoveredPlayerId(closestId);
     };
 
     const handlePointerUp = (e: PointerEvent) => {
-      if (draggingId && dragPos) {
+      const info = dragInfoRef.current;
+      if (draggingId && info) {
         if (!fieldRef.current) return;
         const rect = fieldRef.current.getBoundingClientRect();
         
-        // Use client coordinates directly for field check
         const isInFieldX = e.clientX >= rect.left && e.clientX <= rect.right;
         const isInFieldY = e.clientY >= rect.top && e.clientY <= rect.bottom;
         
-        const draggedPlayer = players.find(p => p.id === draggingId);
+        const targetId = info.hoveredId;
         
-        if (hoveredPlayerId && draggedPlayer) {
+        if (targetId) {
           // --- SWAP LOGIC ---
           pushHistory();
-          const targetPlayer = players.find(p => p.id === hoveredPlayerId);
           
-          if (targetPlayer) {
-            setPlayers(prev => prev.map(p => {
-              // 1. Dragged player takes target's exact position and becomes a starter
+          setPlayers(prev => {
+            const dPlayer = prev.find(p => p.id === draggingId);
+            const tPlayer = prev.find(p => p.id === targetId);
+            
+            if (!dPlayer || !tPlayer) return prev;
+            const isSubstReplacement = dPlayer.isSubstitute || dPlayer.isHolding;
+
+            return prev.map(p => {
               if (p.id === draggingId) {
-                return { ...p, isSubstitute: false, x: targetPlayer.x, y: targetPlayer.y, isHolding: false };
+                return { ...p, isSubstitute: false, x: tPlayer.x, y: tPlayer.y, isHolding: false };
               }
-              // 2. Target player moves according to where dragged player came from
-              if (p.id === hoveredPlayerId) {
-                if (draggedPlayer.isSubstitute || draggedPlayer.isHolding) {
-                  // From bench (or holding spot) to field: Target is bumped to bench
+              if (p.id === targetId) {
+                if (isSubstReplacement) {
                   return { ...p, isSubstitute: true, isHolding: false };
                 } else {
-                  // Field to field: Target takes the dragged player's original position (Mutual Swap)
-                  return { ...p, x: draggedPlayer.x, y: draggedPlayer.y, isHolding: false };
+                  return { ...p, x: dPlayer.x, y: dPlayer.y, isHolding: false };
                 }
               }
               return p;
-            }));
-          }
+            });
+          });
         } else if (isInFieldX && isInFieldY) {
-          // Drop on an empty spot on the field
           pushHistory();
           setPlayers(prev => prev.map(p => 
             p.id === draggingId 
-              ? { ...p, isSubstitute: false, x: dragPos.x, y: dragPos.y, isHolding: false } 
+              ? { ...p, isSubstitute: false, x: info.x, y: info.y, isHolding: false } 
               : p
           ));
         } else {
-          // Drop outside field or back on bench
           pushHistory();
           setPlayers(prev => prev.map(p => 
             p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
@@ -828,22 +851,30 @@ export default function LineupBuilder({
         }
         setHasUnsavedChanges(true);
       }
+      
+      lastInteractionTimeRef.current = Date.now();
       setDraggingId(null);
       setDragPos(null);
       setHoveredPlayerId(null);
+      dragInfoRef.current = null;
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
     window.addEventListener('pointerup', handlePointerUp);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [draggingId, dragPos, players, hoveredPlayerId, pushHistory]);
+  }, [draggingId, players, pushHistory]);
 
   useEffect(() => {
-    if (isRestoringHistory.current) {
-      isRestoringHistory.current = false;
+    // Ignore internal prop updates for 2 seconds after a local change
+    // This solves the "sliding back" issue where a stale parent update overwrites the local drop position
+    const timeSinceInteraction = Date.now() - lastInteractionTimeRef.current;
+    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 2000) {
+      if (!draggingId && timeSinceInteraction >= 2000) {
+        isRestoringHistory.current = false;
+      }
       return;
     }
     if (lineup) {
@@ -1011,7 +1042,7 @@ export default function LineupBuilder({
         date: Date.now() // Set new date only when actually pushing changes
       });
       setHasUnsavedChanges(false);
-    }, 300); // Debounce for 300ms
+    }, 1500); // Debounce for 1.5s (increased from 300ms to save on quota)
     
     return () => clearTimeout(timeout);
   }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, lineup?.id]);
@@ -1062,6 +1093,36 @@ export default function LineupBuilder({
     setPlayers(newPlayers);
     setShowFormationModal(false);
     setHasUnsavedChanges(true);
+  };
+
+  const applyOpponentFormation = (variant: FormationVariant) => {
+    pushHistory();
+    
+    // Create exactly 11 opponent circles
+    const newOpponents: { id: string, x: number, y: number }[] = [];
+    
+    // 1. Goalkeeper (Opponent's perspective: central top)
+    // Home team GK is at (50, 94), so opponent GK is at (50, 6)
+    newOpponents.push({
+      id: Math.random().toString(36).substr(2, 9),
+      x: 50,
+      y: 6 
+    });
+
+    // 2. Outfield players (Flipped coordinates)
+    variant.positions.forEach(pos => {
+      newOpponents.push({
+        id: Math.random().toString(36).substr(2, 9),
+        x: 100 - pos.x, // Flip x to preserve left/right from opponent view
+        y: 100 - pos.y
+      });
+    });
+
+    setOpponents(newOpponents);
+    setShowOpponentFormationModal(false);
+    setShowOpponents(true);
+    setHasUnsavedChanges(true);
+    setTacticalTool('pen'); // Switch back to pen for convenience
   };
 
   const handleSaveCurrentAsFormation = () => {
@@ -1536,7 +1597,7 @@ export default function LineupBuilder({
                     top: `${displayY}%`,
                     touchAction: 'none',
                     transform: 'translate(-50%, -50%)',
-                    transition: (isDragging || isSimplified) ? 'none' : 'all 0.5s cubic-bezier(0.19, 1, 0.22, 1)'
+                    transition: (isDragging || isSimplified || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease'
                   }}
                   onPointerDown={isSimplified ? undefined : (e) => {
                     e.stopPropagation();
@@ -1596,11 +1657,25 @@ export default function LineupBuilder({
                         )}
 
                         {/* Swap indicator icon */}
-                        {hoveredPlayerId === p.id && (
-                          <div className="absolute inset-0 bg-indigo-600/60 backdrop-blur-[1px] flex items-center justify-center text-white">
-                            <RefreshCw size={24} className="animate-spin-slow" />
-                          </div>
-                        )}
+                        {hoveredPlayerId === p.id && (() => {
+                          const dPlayer = players.find(lp => lp.id === draggingId);
+                          const isReplacement = dPlayer && (dPlayer.isSubstitute || dPlayer.isHolding);
+                          return (
+                            <div className="absolute inset-0 bg-indigo-600/60 backdrop-blur-[1px] flex flex-col items-center justify-center text-white p-2">
+                              {isReplacement ? (
+                                <>
+                                  <ArrowUpRight size={28} className="animate-bounce" />
+                                  <span className="text-[10px] font-bold uppercase leading-none mt-1">Byt in</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw size={28} className="animate-spin-slow" />
+                                  <span className="text-[10px] font-bold uppercase leading-none mt-1">Skifta</span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {!isSimplified && isEditMode && (
                           <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
@@ -1824,16 +1899,32 @@ export default function LineupBuilder({
     <div className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
       {isMaximized && (
         <>
-          <button
-            onClick={() => setIsMaximized(false)}
-            className="fixed top-6 right-6 z-[100] w-14 h-14 bg-zinc-900/80 backdrop-blur-xl text-white rounded-2xl flex items-center justify-center shadow-2xl border border-zinc-800 hover:scale-110 active:scale-95 transition-all group"
-            title="Lämna fullskärm"
-          >
-            <Minimize2 size={28} className="group-hover:rotate-12 transition-transform" />
-          </button>
+          <div className="fixed top-6 right-6 z-[100] flex items-center gap-3">
+            <button
+              onClick={() => setIsControlsVisible(!isControlsVisible)}
+              className="w-14 h-14 bg-zinc-900/80 backdrop-blur-xl text-white rounded-2xl flex items-center justify-center shadow-2xl border border-zinc-800 hover:scale-110 active:scale-95 transition-all group"
+              title={isControlsVisible ? "Dölj verktyg" : "Visa verktyg"}
+            >
+              {isControlsVisible ? <EyeOff size={28} /> : <Eye size={28} />}
+            </button>
+            <button
+              onClick={() => setIsMaximized(false)}
+              className="w-14 h-14 bg-zinc-900/80 backdrop-blur-xl text-white rounded-2xl flex items-center justify-center shadow-2xl border border-zinc-800 hover:scale-110 active:scale-95 transition-all group"
+              title="Lämna fullskärm"
+            >
+              <Minimize2 size={28} className="group-hover:rotate-12 transition-transform" />
+            </button>
+          </div>
 
           {/* Tactical Toolbar */}
-          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-3 p-3 bg-zinc-900/90 backdrop-blur-2xl rounded-[32px] border border-zinc-800 shadow-2xl animate-in slide-in-from-bottom-5 w-[95vw] max-w-2xl overflow-x-auto">
+          <AnimatePresence>
+            {isControlsVisible && (
+              <motion.div 
+                initial={{ opacity: 0, y: 50, x: '-50%' }}
+                animate={{ opacity: 1, y: 0, x: '-50%' }}
+                exit={{ opacity: 0, y: 50, x: '-50%' }}
+                className="fixed bottom-10 left-1/2 z-[100] flex flex-col gap-3 p-3 bg-zinc-900/90 backdrop-blur-2xl rounded-[32px] border border-zinc-800 shadow-2xl w-[95vw] max-w-2xl overflow-x-auto"
+              >
             <div className="flex items-center justify-between gap-4">
               {/* Tools row */}
               <div className="flex items-center gap-1">
@@ -1864,6 +1955,13 @@ export default function LineupBuilder({
                   title="Placera motståndare"
                 >
                   <Shirt size={20} strokeWidth={2.5} />
+                </button>
+                <button 
+                  onClick={() => setShowOpponentFormationModal(true)}
+                  className="p-2.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all border border-zinc-800/50"
+                  title="Motståndarformation"
+                >
+                  <Layout size={20} strokeWidth={2.5} className="text-emerald-500" />
                 </button>
                 <button 
                   onClick={() => setTacticalTool('eraser')}
@@ -1898,14 +1996,63 @@ export default function LineupBuilder({
                     onClick={() => setTacticalLineWidth(Math.max(0.4, tacticalLineWidth - 0.2))}
                     className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
                   >
-                    -
+                    <Minus size={14} />
                   </button>
-                  <span className="text-[10px] font-black text-white w-6 text-center">{Math.round(tacticalLineWidth * 10)}</span>
+                  <div className="flex flex-col items-center min-w-8">
+                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Linje</span>
+                    <span className="text-[10px] font-black text-white leading-none">{Math.round(tacticalLineWidth * 10)}</span>
+                  </div>
                   <button 
                     onClick={() => setTacticalLineWidth(Math.min(2.0, tacticalLineWidth + 0.2))}
                     className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
                   >
-                    +
+                    <Plus size={14} />
+                  </button>
+                </div>
+
+                {/* Field Zoom */}
+                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
+                  <button 
+                    onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <div className="flex flex-col items-center min-w-10">
+                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Zoom</span>
+                    <span className="text-[10px] font-black text-white leading-none">{Math.round(fullScreenZoom * 100)}%</span>
+                  </div>
+                  <button 
+                    onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+
+                {/* Player Scale */}
+                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
+                  <button 
+                    onClick={() => {
+                      setPlayerScale(Math.max(0.5, playerScale - 0.05));
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <div className="flex flex-col items-center min-w-10">
+                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Spelare</span>
+                    <span className="text-[10px] font-black text-white leading-none">{Math.round(playerScale * 100)}%</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setPlayerScale(Math.min(1.5, playerScale + 0.05));
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
+                  >
+                    <Plus size={14} />
                   </button>
                 </div>
               </div>
@@ -1947,9 +2094,11 @@ export default function LineupBuilder({
                 </div>
               </div>
             </div>
-          </div>
-        </>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  )}
 
       {/* Dedicated off-screen export node - rendered only during export to avoid duplicate DOM issues */}
       {isExporting && (
@@ -1967,9 +2116,8 @@ export default function LineupBuilder({
         </div>
       )}
 
-      {/* The main field and players */}
       <div className="w-full overflow-hidden rounded-3xl">
-        <div className="transition-transform origin-top" style={{ transform: previewZoom !== 1 ? `scale(${previewZoom})` : 'none', transformOrigin: 'top center' }}>
+        <div className="transition-transform origin-top" style={{ transform: isMaximized ? `scale(${fullScreenZoom})` : (previewZoom !== 1 ? `scale(${previewZoom})` : 'none'), transformOrigin: 'top center' }}>
           {renderLineupContent(false)}
         </div>
       </div>
@@ -2906,6 +3054,80 @@ export default function LineupBuilder({
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/** Opponent Formation Modal */}
+        {showOpponentFormationModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
+            onClick={() => setShowOpponentFormationModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-8 max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Motståndaruppställning</h3>
+                  <p className="text-sm text-zinc-500 font-medium mt-1">Välj en formation för motståndarna (spegelvänd mot toppmålet).</p>
+                </div>
+                <button onClick={() => setShowOpponentFormationModal(false)} className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 shadow-sm">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-10">
+                {FORMATION_TEMPLATES.map((template) => (
+                  <div key={template.id} className="space-y-4">
+                    <div className="flex items-center gap-3 px-1">
+                      <div className="h-6 w-1 bg-emerald-600 rounded-full" />
+                      <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">{template.name}</h4>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {template.variants.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={() => applyOpponentFormation(v)}
+                          className="group relative text-left p-5 rounded-3xl border-2 border-white dark:border-zinc-900 bg-white dark:bg-zinc-900 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] hover:border-emerald-500"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1">
+                              <span className="text-base font-black text-zinc-900 dark:text-white group-hover:text-emerald-600 transition-colors">
+                                {v.name}
+                              </span>
+                              <p className="text-[10px] text-zinc-500 font-medium line-clamp-2 mt-1">
+                                {v.description}
+                              </p>
+                            </div>
+                            <div className="shrink-0 w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
+                               <div className="w-12 h-12 relative">
+                                  <div className="absolute inset-0 border border-zinc-300 dark:border-zinc-600 rounded-md" />
+                                  {/* Opponent perspective: GK at top, y flipped */}
+                                  <div className="absolute w-1 h-1 bg-red-500 rounded-full" style={{ left: '50%', top: '10%', transform: 'translate(-50%, -50%)' }} />
+                                  {v.positions.map((pos, idx) => (
+                                    <div 
+                                      key={idx} 
+                                      className="absolute w-1 h-1 bg-red-400 rounded-full"
+                                      style={{ left: `${100 - pos.x}%`, top: `${100 - pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                                    />
+                                  ))}
+                               </div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 ))}

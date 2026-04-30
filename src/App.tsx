@@ -167,6 +167,17 @@ export default function App() {
 
   // Unified Cloud Data Hook
   useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (sessionActionCount > 0 || isSyncing) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [sessionActionCount, isSyncing]);
+
+  useEffect(() => {
     if (user && isAuthReady) {
       console.log("App: Starting primary cloud listener for", user.email);
       const docRef = doc(db, 'users', user.uid, 'config', 'state');
@@ -304,7 +315,7 @@ export default function App() {
         }
       };
       
-      const timeout = setTimeout(syncData, 500); // 500ms sync debounce
+      const timeout = setTimeout(syncData, 3000); // 3s sync debounce (increased from 500ms to save on quota)
       return () => clearTimeout(timeout);
     }
   }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone]);
@@ -1156,14 +1167,33 @@ export default function App() {
             </div>
             
             <div className="flex items-center gap-2">
-              {isSyncing && (
+              {(isSyncing || (user && sessionActionCount > 0)) && (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full border border-indigo-100 dark:border-indigo-800 animate-pulse"
+                  className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
+                    isSyncing 
+                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800 animate-pulse' 
+                      : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/30'
+                  }`}
                 >
-                  <Cloud size={14} className="animate-bounce" />
-                  <span className="text-[10px] font-black uppercase tracking-widest leading-none">Synkar</span>
+                  {isSyncing ? (
+                    <>
+                      <Cloud size={14} className="animate-bounce" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Synkar</span>
+                    </>
+                  ) : (
+                    <button 
+                      onClick={handleManualPush}
+                      className="flex items-center gap-2 cursor-pointer hover:opacity-80 active:scale-95 transition-all"
+                      title="Spara ändringar till molnet nu"
+                    >
+                      <TimerIcon size={14} className="animate-spin-slow" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Väntar...</span>
+                      <div className="w-px h-3 bg-amber-200 dark:bg-amber-800 mx-1" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none underline decoration-amber-400">Spara nu</span>
+                    </button>
+                  )}
                 </motion.div>
               )}
               {!sharedLeaderboardId && (
