@@ -64,6 +64,14 @@ export interface PeriodStandings {
   points: number;
 }
 
+export interface BonusPoint {
+  id: string;
+  playerId: string;
+  points: number;
+  reason: string;
+  date: number;
+}
+
 export interface Period {
   id: string;
   name: string;
@@ -72,6 +80,7 @@ export interface Period {
   standings: PeriodStandings[];
   isActive?: boolean; // New field to track which period is currently active for new exercises
   shareId?: string; // ID for the shared version of this period
+  bonusPoints?: BonusPoint[];
 }
 
 export interface PointsConfig {

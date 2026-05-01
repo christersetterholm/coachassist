@@ -319,23 +319,31 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   };
 
   const handleDragEndInOverview = (playerId: string, x: number, y: number) => {
-    // Find source ID
-    const sourceTeam = teams.find(t => t.playerIds.includes(playerId));
-    const isJoker = jokerPlayerIds.includes(playerId);
-    const sourceId = sourceTeam ? sourceTeam.id : (isJoker ? 'joker' : null);
+    // Find all potential target containers
+    const teamElements = document.querySelectorAll('[data-overview-team-id]');
+    let targetTeamId: string | null = null;
 
-    // elementsFromPoint is more robust
-    const elements = document.elementsFromPoint(x, y);
-    const teamElement = elements
-      .map(el => (el as HTMLElement).closest?.('[data-overview-team-id]'))
-      .find(te => {
-        const id = te?.getAttribute('data-overview-team-id');
-        return id && id !== sourceId;
-      });
+    // Manual hit detection using getBoundingClientRect
+    for (const el of Array.from(teamElements)) {
+      const rect = el.getBoundingClientRect();
+      if (
+        x >= rect.left && 
+        x <= rect.right && 
+        y >= rect.top && 
+        y <= rect.bottom
+      ) {
+        targetTeamId = el.getAttribute('data-overview-team-id');
+        break;
+      }
+    }
 
-    if (teamElement) {
-      const targetTeamId = teamElement.getAttribute('data-overview-team-id');
-      if (targetTeamId) {
+    if (targetTeamId) {
+      // Find source ID to ignore it during hit detection
+      const sourceTeam = teams.find(t => t.playerIds.includes(playerId));
+      const isJoker = jokerPlayerIds.includes(playerId);
+      const sourceId = sourceTeam ? sourceTeam.id : (isJoker ? 'joker' : null);
+
+      if (targetTeamId !== sourceId) {
         movePlayerInternal(playerId, targetTeamId);
       }
     }
@@ -841,7 +849,10 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                   pointerEvents: 'none'
                                 }}
                                 onDragStart={() => setDraggedPlayerId(pid)}
-                                onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                                onDragEnd={(e: any, info) => {
+                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
+                                }}
                                 className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                                 style={{ backgroundColor: team.color }}
                               >
@@ -890,7 +901,10 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                   pointerEvents: 'none'
                                 }}
                                 onDragStart={() => setDraggedPlayerId(pid)}
-                                onDragEnd={(e, info) => handleDragEndInOverview(pid, info.point.x, info.point.y)}
+                                onDragEnd={(e: any, info) => {
+                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
+                                }}
                                 className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
                               >
                                 {player.name}

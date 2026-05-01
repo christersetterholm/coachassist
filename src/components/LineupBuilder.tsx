@@ -302,7 +302,44 @@ export default function LineupBuilder({
   const isRestoringHistory = useRef(false);
   const skipHistoryRemoteUpdate = useRef(false);
 
+  // Sync local state when lineup prop changes (remote updates)
+  useEffect(() => {
+    if (!lineup) return;
+    
+    // We only want to sync if we don't have unsaved changes, 
+    // or if the lineup ID changed (switching lineup)
+    const isNewId = lineup.id !== currentIdRef.current;
+    
+    if (isNewId || !hasUnsavedChanges) {
+      setLineupName(lineup.matchTitle || '');
+      setTeamName(lineup.teamName || '');
+      setPlayers(lineup.players || []);
+      setPlayerScale(lineup.playerScale ?? 1.0);
+      setNameTagStyle(lineup.nameTagStyle || 'light');
+      setNameDisplayMode(lineup.nameDisplayMode || 'full');
+      setShowNameBackground(lineup.showNameBackground ?? true);
+      setNameBackgroundType(lineup.nameBackgroundType || 'classic');
+      setShowPhoto(lineup.showPhoto ?? true);
+      setShowNumber(lineup.showNumber ?? true);
+      setTeamLogoUrl(lineup.teamLogoUrl || '');
+      setPitchType(lineup.pitchType || 'classic');
+      setCurrentFormation(lineup.formation || '');
+      setTeamNotes(lineup.notes?.team?.text || '');
+      setTeamMedia(lineup.notes?.team?.media || []);
+      setOpponentNotes(lineup.notes?.opponent?.text || '');
+      setOpponentMedia(lineup.notes?.opponent?.media || []);
+      setTacticalDrawings(lineup.tacticalBoard?.drawings || []);
+      setFootballPos(lineup.tacticalBoard?.footballPos || null);
+      setOpponents(lineup.tacticalBoard?.opponents || []);
+      setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
+      
+      currentIdRef.current = lineup.id;
+      setHasUnsavedChanges(false);
+    }
+  }, [lineup]);
+
   const currentId = lineup?.id || 'temp';
+  const currentIdRef = useRef(currentId);
   const history = lineupHistories[currentId] || [];
   const future = lineupFutures[currentId] || [];
 

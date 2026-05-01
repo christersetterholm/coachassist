@@ -123,7 +123,10 @@ export default function PlayerCard({
                   drag={!disabled}
                   dragSnapToOrigin
                   onDragStart={() => onDragStart?.(p.id)}
-                  onDragEnd={(e, info) => handleDragEnd(p.id, info)}
+                  onDragEnd={(e: any, info) => {
+                    const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                    handleDragEnd(p.id, { point: { x: point.clientX || point.x, y: point.clientY || point.y } });
+                  }}
                   whileTap={{ scale: 0.95 }}
                   whileDrag={{ 
                     zIndex: 9999, 

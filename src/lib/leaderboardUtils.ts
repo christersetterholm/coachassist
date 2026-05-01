@@ -6,14 +6,20 @@ export interface PlayerStats extends SquadPlayer {
     date: number;
     exerciseName: string;
     points: number;
+    isBonus?: boolean;
   }[];
 }
 
 export function calculateLeaderboard(
   squad: SquadPlayer[],
   exercises: Exercise[],
-  periodId: string | 'current'
+  periodId: string | 'current',
+  periods: Period[] = []
 ): PlayerStats[] {
+  // Find the relevant period for bonus points
+  const currentPeriod = periods.find(p => p.id === periodId);
+  const bonusPoints = currentPeriod?.bonusPoints || [];
+
   // Get the relevant exercises for the selected view
   const relevantExercises = exercises.filter(e => {
     if (!e.isFinished) return false;
@@ -24,9 +30,10 @@ export function calculateLeaderboard(
 
   // Calculate total points for each player based on relevant exercises
   return squad.map(player => {
-    const history: { date: number; exerciseName: string; points: number }[] = [];
+    const history: { date: number; exerciseName: string; points: number; isBonus?: boolean }[] = [];
     let totalPoints = 0;
 
+    // Add points from exercises
     relevantExercises.forEach(exercise => {
       const uniqueScores = Array.from(new Set(exercise.teams.map(t => t.score))).sort((a, b) => b - a);
       const config = exercise.pointsConfig || { first: 1, second: 0, third: 0 };
@@ -55,6 +62,17 @@ export function calculateLeaderboard(
           points: pointsAwarded
         });
       }
+    });
+
+    // Add bonus points
+    bonusPoints.filter(bp => bp.playerId === player.id).forEach(bp => {
+      totalPoints += bp.points;
+      history.push({
+        date: bp.date,
+        exerciseName: `Bonus: ${bp.reason}`,
+        points: bp.points,
+        isBonus: true
+      });
     });
 
     return {

@@ -48,6 +48,12 @@ export default function Leaderboard({
   const [newPeriodName, setNewPeriodName] = useState('');
   const [renameValue, setRenameValue] = useState('');
   const [isSharing, setIsSharing] = useState(false);
+  const [showBonusModal, setShowBonusModal] = useState(false);
+  const [bonusData, setBonusData] = useState<{ playerId: string, points: number, reason: string }>({
+    playerId: '',
+    points: 1,
+    reason: ''
+  });
   const [sharedData, setSharedData] = useState<any>(null);
   const [isLoadingShared, setIsLoadingShared] = useState(!!sharedId);
 
@@ -83,7 +89,7 @@ export default function Leaderboard({
     if (!sharedId && period?.shareId && userUid) {
       const syncShared = async () => {
         try {
-          const stats = calculateLeaderboard(squad, exercises, selectedPeriodId);
+          const stats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods);
           const dataToUpdate = {
             id: period.shareId,
             name: period.name,
@@ -110,7 +116,7 @@ export default function Leaderboard({
   }, [squad, exercises, selectedPeriodId, periods, sharedId, userUid]);
 
   // Get the relevant exercises for the selected view
-  const playerStats = calculateLeaderboard(squad, exercises, selectedPeriodId);
+  const playerStats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods);
 
   // For historical periods, we might want to use the saved standings instead of recalculating
   // but recalculating is fine if the exercises are still there.
@@ -158,6 +164,44 @@ export default function Leaderboard({
     setSelectedPeriodId('current');
   };
 
+  const handleBonusConfirm = () => {
+    if (!bonusData.playerId || !bonusData.reason.trim()) return;
+    
+    const period = periods.find(p => p.id === selectedPeriodId);
+    if (!period) return;
+
+    const newBonus = {
+      id: Math.random().toString(36).substring(2, 9),
+      playerId: bonusData.playerId,
+      points: bonusData.points,
+      reason: bonusData.reason,
+      date: Date.now()
+    };
+
+    const updatedBonusPoints = [...(period.bonusPoints || []), newBonus];
+    onUpdatePeriod(period.id, { bonusPoints: updatedBonusPoints });
+    
+    setShowBonusModal(false);
+    setBonusData({ playerId: '', points: 1, reason: '' });
+  };
+
+  const handleRemoveBonus = (bonusId: string) => {
+    const period = periods.find(p => p.id === selectedPeriodId);
+    if (!period) return;
+
+    const updatedBonusPoints = (period.bonusPoints || []).filter(bp => bp.id !== bonusId);
+    onUpdatePeriod(period.id, { bonusPoints: updatedBonusPoints });
+  };
+
+  const finalStats = sharedData 
+    ? sharedData.standings.map((s: any) => ({
+        id: s.playerId,
+        name: s.playerName,
+        totalPoints: s.points,
+        history: s.history || []
+      }))
+    : displayStats;
+
   const togglePlayer = (playerId: string) => {
     const newExpanded = new Set(expandedPlayers);
     if (newExpanded.has(playerId)) {
@@ -168,7 +212,7 @@ export default function Leaderboard({
     setExpandedPlayers(newExpanded);
     
     // If we manually toggle, we might need to sync allExpanded state
-    if (newExpanded.size === playerStats.length) {
+    if (newExpanded.size === finalStats.length) {
       setAllExpanded(true);
     } else if (newExpanded.size === 0) {
       setAllExpanded(false);
@@ -180,7 +224,7 @@ export default function Leaderboard({
       setExpandedPlayers(new Set());
       setAllExpanded(false);
     } else {
-      setExpandedPlayers(new Set(playerStats.map(p => p.id)));
+      setExpandedPlayers(new Set(finalStats.map((p: any) => p.id)));
       setAllExpanded(true);
     }
   };
@@ -270,15 +314,6 @@ export default function Leaderboard({
     );
   }
 
-  const finalStats = sharedData 
-    ? sharedData.standings.map((s: any) => ({
-        id: s.playerId,
-        name: s.playerName,
-        totalPoints: s.points,
-        history: s.history || []
-      }))
-    : displayStats;
-
   const title = sharedData ? sharedData.name : 'Poängligan';
 
   const getSubtitle = (player: any) => {
@@ -336,73 +371,79 @@ export default function Leaderboard({
                     </button>
                   )}
                 </div>
-              ) : null}
+              ) : (
+                <h1 className="text-zinc-900 dark:text-white font-black text-xl sm:text-2xl">
+                  {title}
+                </h1>
+              )}
           </div>
 
-          {!sharedId && (
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!sharedId && (
+              <>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-sm text-sm"
+                >
+                  <Plus size={18} />
+                  <span className="hidden xs:inline">Ny tävling</span>
+                  <span className="xs:hidden">Ny</span>
+                </button>
+
+                {selectedPeriodId !== 'current' && 
+                 !periods.find(p => p.id === selectedPeriodId)?.isActive && 
+                 !periods.find(p => p.id === selectedPeriodId)?.endDate && (
+                  <button
+                    onClick={() => onSwitchPeriod(selectedPeriodId)}
+                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-sm text-sm"
+                  >
+                    <Check size={18} />
+                    <span>Aktivera</span>
+                  </button>
+                )}
+
+                {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
+                  <button
+                    onClick={() => setShowCloseModal(true)}
+                    className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all shadow-sm text-sm"
+                  >
+                    <Lock size={18} />
+                    <span>Avsluta</span>
+                  </button>
+                )}
+                {selectedPeriodId !== 'current' && (
+                  <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-xl font-bold border border-red-100 dark:border-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shadow-sm text-sm"
+                  >
+                    <Trash2 size={18} />
+                    <span>Ta bort</span>
+                  </button>
+                )}
+
+                <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
+
+                <button
+                  onClick={handleShare}
+                  disabled={isSharing}
+                  className="flex items-center gap-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm text-sm disabled:opacity-50"
+                >
+                  {isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
+                  <span>{isSharing ? 'Skapar...' : 'Dela'}</span>
+                </button>
+              </>
+            )}
+
+            {finalStats.some((p: any) => p.history.length > 0) && (
               <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-sm text-sm"
+                onClick={toggleAll}
+                className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm"
               >
-                <Plus size={18} />
-                <span className="hidden xs:inline">Ny tävling</span>
-                <span className="xs:hidden">Ny</span>
+                {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
+                <span className="hidden xs:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
               </button>
-
-              {selectedPeriodId !== 'current' && 
-               !periods.find(p => p.id === selectedPeriodId)?.isActive && 
-               !periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                <button
-                  onClick={() => onSwitchPeriod(selectedPeriodId)}
-                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-sm text-sm"
-                >
-                  <Check size={18} />
-                  <span>Aktivera</span>
-                </button>
-              )}
-
-              {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                <button
-                  onClick={() => setShowCloseModal(true)}
-                  className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all shadow-sm text-sm"
-                >
-                  <Lock size={18} />
-                  <span>Avsluta</span>
-                </button>
-              )}
-              {selectedPeriodId !== 'current' && (
-                <button
-                  onClick={() => setShowDeleteModal(true)}
-                  className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-xl font-bold border border-red-100 dark:border-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shadow-sm text-sm"
-                >
-                  <Trash2 size={18} />
-                  <span>Ta bort</span>
-                </button>
-              )}
-
-              <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
-
-              <button
-                onClick={handleShare}
-                disabled={isSharing}
-                className="flex items-center gap-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm text-sm disabled:opacity-50"
-              >
-                {isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
-                <span>{isSharing ? 'Skapar...' : 'Dela'}</span>
-              </button>
-
-              {finalStats.some((p: any) => p.history.length > 0) && (
-                <button
-                  onClick={toggleAll}
-                  className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm"
-                >
-                  {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
-                  <span className="hidden xs:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
-                </button>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -442,6 +483,19 @@ export default function Leaderboard({
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
+                  {!sharedId && !periods.find(p => p.id === selectedPeriodId)?.endDate && selectedPeriodId !== 'current' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBonusData({ playerId: player.id, points: 1, reason: '' });
+                        setShowBonusModal(true);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center bg-amber-50 dark:bg-amber-900/20 text-amber-500 rounded-lg hover:bg-amber-100 transition-all shadow-sm active:scale-95"
+                      title="Ge bonuspoäng"
+                    >
+                      <Star size={16} fill="currentColor" />
+                    </button>
+                  )}
                   <div className="text-right">
                     <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
                       {player.totalPoints}
@@ -467,17 +521,35 @@ export default function Leaderboard({
                     <div className="bg-zinc-50 dark:bg-zinc-950/50 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800">
                       <div className="flex flex-wrap gap-x-6 gap-y-3">
                         {player.history.map((h, i) => (
-                          <div key={i} className="flex flex-col gap-0.5">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase">
-                              {new Date(h.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
-                              <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                                {h.exerciseName}: <span className="text-indigo-600 dark:text-indigo-400">+{h.points}</span>
-                              </span>
+                            <div className="flex items-center group relative overflow-hidden">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[10px] font-bold text-zinc-400 uppercase">
+                                  {new Date(h.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {h.isBonus ? (
+                                    <Star size={10} className="text-amber-500" fill="currentColor" />
+                                  ) : (
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                  )}
+                                  <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                    {h.exerciseName}: <span className={h.isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}>+{h.points}</span>
+                                  </span>
+                                </div>
+                              </div>
+                              {h.isBonus && !sharedId && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const bp = selectedPeriod?.bonusPoints?.find(bp => bp.date === h.date && bp.playerId === player.id);
+                                    if (bp) handleRemoveBonus(bp.id);
+                                  }}
+                                  className="ml-2 p-1 text-zinc-300 hover:text-red-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
                             </div>
-                          </div>
                         ))}
                       </div>
                     </div>
@@ -696,6 +768,83 @@ export default function Leaderboard({
                 >
                   Avbryt
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Bonus Point Modal */}
+      <AnimatePresence>
+        {showBonusModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowBonusModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center text-amber-600 dark:text-amber-400 mb-6 mx-auto">
+                <Star size={32} fill="currentColor" />
+              </div>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Ge bonuspoäng</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
+                Ge extra poäng till <span className="text-zinc-900 dark:text-white font-bold">{squad.find(p => p.id === bonusData.playerId)?.name}</span> för t.ex. bra inställning eller extra prestation.
+              </p>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Anledning</label>
+                  <input
+                    type="text"
+                    value={bonusData.reason}
+                    onChange={(e) => setBonusData(prev => ({ ...prev, reason: e.target.value }))}
+                    placeholder="T.ex. Bra kamratskap"
+                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all font-bold text-sm"
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Poäng (+)</label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1, 2, 3, 5, 10].map((pts) => (
+                      <button
+                        key={pts}
+                        onClick={() => setBonusData(prev => ({ ...prev, points: pts }))}
+                        className={`py-2 rounded-lg font-black text-xs transition-all ${
+                          bonusData.points === pts 
+                            ? 'bg-amber-500 text-white shadow-sm' 
+                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {pts}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="flex flex-col gap-3 pt-2">
+                  <button
+                    onClick={handleBonusConfirm}
+                    disabled={!bonusData.reason.trim()}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
+                  >
+                    Ge bonuspoäng
+                  </button>
+                  <button
+                    onClick={() => setShowBonusModal(false)}
+                    className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                  >
+                    Avbryt
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

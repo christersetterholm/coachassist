@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ArrowLeft, Plus, Trash2, GripVertical, Clock, Calendar, Check, AlertCircle, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, Copy, UserPlus, X, ClipboardList, Edit2, LayoutList, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -63,6 +63,34 @@ function MomentItem({
   const [showMediaInputs, setShowMediaInputs] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const adjustHeight = () => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      }
+    };
+
+    // Run immediately
+    adjustHeight();
+
+    // Also run after a short delay to handle potential layout shifts on mobile
+    const timeoutId = setTimeout(adjustHeight, 10);
+    
+    // Add window resize listener
+    window.addEventListener('resize', adjustHeight);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('resize', adjustHeight);
+    };
+  }, [moment.description, mode]);
+
+  // Keep latest moment in a ref to avoid stale closures during async operations like upload
+  const momentRef = useRef(moment);
+  momentRef.current = moment;
 
   const isYouTube = (url?: string) => {
     if (!url) return false;
@@ -80,23 +108,24 @@ function MomentItem({
     try {
       const newUrls: string[] = [];
 
-      for (const file of filesArray) {
+      // Process uploads in parallel for better performance and to reduce stale state window
+      const uploadPromises = filesArray.map(async (file) => {
         // Check size (limit to 5MB for safety)
         if (file.size > 5 * 1024 * 1024) {
-          alert(`Filen ${file.name} är för stor (max 5MB)`);
-          continue;
+          console.warn(`Filen ${file.name} är för stor (max 5MB)`);
+          return null;
         }
 
         const fileName = `${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `moments/${moment.id}/${fileName}`);
+        const storageRef = ref(storage, `moments/${momentRef.current.id}/${fileName}`);
         const uploadTask = uploadBytesResumable(storageRef, file);
 
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<string | null>((resolve, reject) => {
           uploadTask.on('state_changed', 
             (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              // Simple progress calculation for multiple files
-              setUploadProgress(((completedCount / filesArray.length) * 100) + (progress / filesArray.length));
+              // Simple progress calculation (we'll just show the last one's progress or average)
+              setUploadProgress(progress);
             }, 
             (error) => {
               console.error("Upload error", error);
@@ -104,19 +133,26 @@ function MomentItem({
             }, 
             async () => {
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              newUrls.push(downloadURL);
-              completedCount++;
-              resolve();
+              resolve(downloadURL);
             }
           );
         });
-      }
-
-      const currentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
-      updateMoment(moment.id, { 
-        imageUrls: [...currentUrls, ...newUrls],
-        imageUrl: undefined // Migrate away from single imageUrl
       });
+
+      const results = await Promise.all(uploadPromises);
+      const filteredResults = results.filter((url): url is string => url !== null);
+      
+      if (filteredResults.length > 0) {
+        // Use the ref to get the absolute latest state of the moment before updating
+        const latestMoment = momentRef.current;
+        const currentUrls = latestMoment.imageUrls || (latestMoment.imageUrl ? [latestMoment.imageUrl] : []);
+        
+        updateMoment(latestMoment.id, { 
+          imageUrls: [...currentUrls, ...filteredResults],
+          imageUrl: undefined // Always migrate to the array version
+        });
+      }
+      
       setUploadProgress(null);
     } catch (error: any) {
       console.error("Setup error", error);
@@ -159,8 +195,8 @@ function MomentItem({
         </div>
         {/* Main moment info */}
         <div className="flex-1 space-y-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4">
+            <div className="flex-1 min-w-0">
               {mode === 'plan' ? (
                 <input
                   type="text"
@@ -170,20 +206,25 @@ function MomentItem({
                   placeholder="Namn på moment..."
                 />
               ) : (
-                <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">
+                <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight break-words">
                   {moment.name || 'Namnlöst moment'}
                 </h4>
               )}
             </div>
-            <div className="flex items-center gap-1 bg-zinc-50 dark:bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center gap-1 bg-zinc-50 dark:bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-100 dark:border-zinc-800 shrink-0 w-fit">
               <Clock size={12} className="text-zinc-400" />
               {mode === 'plan' ? (
-                <input
-                  type="number"
-                  value={moment.duration}
-                  onChange={(e) => updateMoment(moment.id, { duration: parseInt(e.target.value) || 0 })}
-                  className="w-10 bg-transparent border-none p-0 text-sm font-black text-zinc-900 dark:text-white focus:ring-0 text-center"
-                />
+                <div className="relative flex items-center">
+                  <select
+                    value={moment.duration}
+                    onChange={(e) => updateMoment(moment.id, { duration: parseInt(e.target.value) || 0 })}
+                    className="appearance-none bg-transparent border-none p-0 pr-1 text-sm font-black text-zinc-900 dark:text-white focus:ring-0 text-center cursor-pointer min-w-[20px]"
+                  >
+                    {Array.from({ length: 120 }, (_, i) => i + 1).map(v => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                </div>
               ) : (
                 <span className="text-sm font-black text-zinc-900 dark:text-white">{moment.duration}</span>
               )}
@@ -193,10 +234,12 @@ function MomentItem({
 
           {mode === 'plan' ? (
             <textarea
+              ref={textareaRef}
               value={moment.description || ''}
               onChange={(e) => updateMoment(moment.id, { description: e.target.value })}
-              className="w-full bg-transparent border-none p-0 text-sm text-zinc-500 dark:text-zinc-400 focus:ring-0 resize-none min-h-[60px]"
+              className="w-full bg-transparent border-none p-0 text-sm text-zinc-500 dark:text-zinc-400 focus:ring-0 resize-none overflow-hidden min-h-[40px]"
               placeholder="Beskriv vad som ska göras i det här momentet..."
+              rows={1}
             />
           ) : (
             moment.description && (
@@ -213,10 +256,15 @@ function MomentItem({
                 <button
                   type="button"
                   onClick={() => setShowMediaInputs(!showMediaInputs)}
-                  className="flex items-center gap-2 text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-indigo-600 transition-colors w-fit"
+                  className="flex items-center gap-2 text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-indigo-600 transition-colors w-fit relative"
                 >
                   <ImageIcon size={14} />
                   <span>Media & Länkar</span>
+                  {(!showMediaInputs && ((moment.imageUrls?.length || 0) > 0 || moment.imageUrl || moment.externalLink)) && (
+                    <span className="flex h-4 min-w-[1rem] px-1 items-center justify-center bg-indigo-500 text-white text-[8px] font-bold rounded-full shadow-sm">
+                      {((moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0) + (moment.externalLink ? 1 : 0))}
+                    </span>
+                  )}
                   <ChevronDown size={14} className={`transition-transform ${showMediaInputs ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -561,10 +609,35 @@ export default function SessionEditor({
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
   const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'schema' | 'attendance'>('schema');
-
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const mode = initialMode;
   const setMode = onModeChange || (() => {});
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Use a ref for the session to avoid stale closures in event handlers
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
+  // Auto-resize notes textarea
+  useEffect(() => {
+    const adjustHeight = () => {
+      if (notesTextareaRef.current) {
+        notesTextareaRef.current.style.height = 'auto';
+        notesTextareaRef.current.style.height = `${notesTextareaRef.current.scrollHeight}px`;
+      }
+    };
+
+    if (showNotes) {
+      adjustHeight();
+      const timeoutId = setTimeout(adjustHeight, 10);
+      window.addEventListener('resize', adjustHeight);
+      return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('resize', adjustHeight);
+      };
+    }
+  }, [session.notes, showNotes, mode]);
 
   const currentExercise = useMemo(() => 
     exercises.find(e => e.id === selectedExerciseForTeams),
@@ -656,24 +729,27 @@ export default function SessionEditor({
   };
 
   const updateMoment = (id: string, updates: Partial<SessionMoment>) => {
+    const currentSession = sessionRef.current;
     onUpdate({
-      ...session,
-      moments: session.moments.map(m => m.id === id ? { ...m, ...updates } : m),
+      ...currentSession,
+      moments: currentSession.moments.map(m => m.id === id ? { ...m, ...updates } : m),
       updatedAt: Date.now()
     });
   };
 
   const removeMoment = (id: string) => {
+    const currentSession = sessionRef.current;
     onUpdate({
-      ...session,
-      moments: session.moments.filter(m => m.id !== id),
+      ...currentSession,
+      moments: currentSession.moments.filter(m => m.id !== id),
       updatedAt: Date.now()
     });
   };
 
   const handleReorder = (newMoments: SessionMoment[]) => {
+    const currentSession = sessionRef.current;
     onUpdate({
-      ...session,
+      ...currentSession,
       moments: newMoments,
       updatedAt: Date.now()
     });
@@ -1006,10 +1082,12 @@ export default function SessionEditor({
                       <div className="px-5 pb-5 pt-0">
                         {mode === 'plan' ? (
                           <textarea
+                            ref={notesTextareaRef}
                             value={session.notes || ''}
                             onChange={(e) => onUpdate({ ...session, notes: e.target.value, updatedAt: Date.now() })}
                             placeholder="Skriv in mål, syfte eller anteckningar för träningen..."
-                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium"
+                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium overflow-hidden"
+                            rows={1}
                           />
                         ) : (
                           session.notes ? (

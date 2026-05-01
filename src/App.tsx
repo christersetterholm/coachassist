@@ -77,6 +77,7 @@ export default function App() {
   });
   
   const [view, setView] = useState<View>('training');
+  const [trainingTab, setTrainingTab] = useState<'planned' | 'completed' | 'exercises'>('planned');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -329,7 +330,7 @@ export default function App() {
 
         try {
           for (const period of sharedPeriods) {
-            const stats = calculateLeaderboard(squad, exercises, period.id);
+            const stats = calculateLeaderboard(squad, exercises, period.id, periods);
             const dataToUpdate = {
               id: period.shareId,
               name: period.name,
@@ -1328,6 +1329,8 @@ export default function App() {
                   exercises={exercises} 
                   sessions={sessions}
                   squad={squad}
+                  activeTab={trainingTab}
+                  onTabChange={setTrainingTab}
                   onSelectExercise={(id) => {
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setView('exercise');
@@ -1371,6 +1374,7 @@ export default function App() {
                   onDeleteSession={onDeleteSession}
                   onCopySession={handleCopySession}
                   onUpdateSession={onUpdateSession}
+                  onMovePlayer={movePlayer}
                   onReorderSessions={(reordered) => {
                     setData(prev => ({ ...prev, sessions: reordered }));
                     setSessionActionCount(prev => prev + 1);

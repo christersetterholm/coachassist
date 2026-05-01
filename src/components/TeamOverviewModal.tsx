@@ -21,21 +21,32 @@ export default function TeamOverviewModal({
 }: TeamOverviewModalProps) {
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
 
-  const handleDragEnd = (playerId: string, x: number, y: number) => {
-    // Find source team ID to ignore it during hit detection
-    const sourceTeam = exercise.teams.find(t => t.playerIds?.includes(playerId));
-    const isJokerSource = exercise.jokerPlayerIds?.includes(playerId);
-    const sourceId = sourceTeam ? sourceTeam.id : (isJokerSource ? 'joker' : null);
+    const handleDragEnd = (playerId: string, x: number, y: number) => {
+    // Find all potential target containers
+    const teamElements = document.querySelectorAll('[data-team-id]');
+    let targetTeamId: string | null = null;
 
-    // elementsFromPoint is more robust
-    const elements = document.elementsFromPoint(x, y);
-    const teamElement = elements
-      .map(el => (el as HTMLElement).closest?.('[data-team-id]'))
-      .find(te => te && te.getAttribute('data-team-id') !== sourceId);
+    // Manual hit detection using getBoundingClientRect
+    for (const el of Array.from(teamElements)) {
+      const rect = el.getBoundingClientRect();
+      if (
+        x >= rect.left && 
+        x <= rect.right && 
+        y >= rect.top && 
+        y <= rect.bottom
+      ) {
+        targetTeamId = el.getAttribute('data-team-id');
+        break;
+      }
+    }
 
-    if (teamElement) {
-      const targetTeamId = teamElement.getAttribute('data-team-id');
-      if (targetTeamId) {
+    if (targetTeamId) {
+      // Find source team ID to see if we're dropping back into the same team
+      const sourceTeam = exercise.teams.find(t => t.playerIds?.includes(playerId));
+      const isJokerSource = exercise.jokerPlayerIds?.includes(playerId);
+      const sourceId = sourceTeam ? sourceTeam.id : (isJokerSource ? 'joker' : null);
+
+      if (targetTeamId !== sourceId) {
         onMovePlayer(exercise.id, playerId, targetTeamId);
       }
     }
@@ -112,7 +123,10 @@ export default function TeamOverviewModal({
                             pointerEvents: 'none'
                           }}
                           onDragStart={() => setDraggedPlayerId(pid)}
-                          onDragEnd={(e, info) => handleDragEnd(pid, info.point.x, info.point.y)}
+                          onDragEnd={(e: any, info) => {
+                            const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                            handleDragEnd(pid, point.clientX || point.x, point.clientY || point.y);
+                          }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                           style={{ backgroundColor: team.color }}
                         >
@@ -164,7 +178,10 @@ export default function TeamOverviewModal({
                             pointerEvents: 'none'
                           }}
                           onDragStart={() => setDraggedPlayerId(pid)}
-                          onDragEnd={(e, info) => handleDragEnd(pid, info.point.x, info.point.y)}
+                          onDragEnd={(e: any, info) => {
+                            const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                            handleDragEnd(pid, point.clientX || point.x, point.clientY || point.y);
+                          }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                           style={{ backgroundColor: '#4f46e5' }}
                         >
