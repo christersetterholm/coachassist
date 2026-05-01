@@ -315,7 +315,7 @@ export default function App() {
         }
       };
       
-      const timeout = setTimeout(syncData, 3000); // 3s sync debounce (increased from 500ms to save on quota)
+      const timeout = setTimeout(syncData, 1000); // 1s sync debounce (reduced from 3s)
       return () => clearTimeout(timeout);
     }
   }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone]);

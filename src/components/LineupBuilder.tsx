@@ -6,13 +6,14 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
 
 import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, storage } from '../lib/firebase';
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -170,6 +171,33 @@ export default function LineupBuilder({
   const [opponentNotes, setOpponentNotes] = useState(lineup?.notes?.opponent?.text || '');
   const [opponentMedia, setOpponentMedia] = useState<string[]>(lineup?.notes?.opponent?.media || []);
   const [showNotesModal, setShowNotesModal] = useState(false);
+  const [selectedMediaUrl, setSelectedMediaUrl] = useState<string | null>(null);
+  const teamTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const opponentTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isVideo = (url: string) => {
+    return url.toLowerCase().match(/\.(mp4|webm|ogg|mov)$/) || url.includes('video');
+  };
+
+  const adjustTextAreaHeight = (textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    if (showNotesModal) {
+      // Give time for the modal animation/mounting before calculating height
+      const timer = setTimeout(() => {
+        adjustTextAreaHeight(teamTextareaRef.current);
+        adjustTextAreaHeight(opponentTextareaRef.current);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showNotesModal, teamNotes, opponentNotes]);
+
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [selectedForEdit, setSelectedForEdit] = useState<string | null>(null); // LineupPlayer id
   const [pickerMode, setPickerMode] = useState<'starter' | 'sub' | null>(null);
@@ -876,8 +904,8 @@ export default function LineupBuilder({
     // Ignore internal prop updates for 2 seconds after a local change
     // This solves the "sliding back" issue where a stale parent update overwrites the local drop position
     const timeSinceInteraction = Date.now() - lastInteractionTimeRef.current;
-    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 2000) {
-      if (!draggingId && timeSinceInteraction >= 2000) {
+    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 2000 || hasUnsavedChanges) {
+      if (!draggingId && timeSinceInteraction >= 2000 && !hasUnsavedChanges) {
         isRestoringHistory.current = false;
       }
       return;
@@ -966,13 +994,26 @@ export default function LineupBuilder({
         return prev;
       });
 
-      setTeamNotes(lineup.notes?.team?.text || '');
-      setTeamMedia(lineup.notes?.team?.media || []);
-      setOpponentNotes(lineup.notes?.opponent?.text || '');
-      setOpponentMedia(lineup.notes?.opponent?.media || []);
-
-      // Crucially, reset the unsaved changes flag when new remote data is applied
-      setHasUnsavedChanges(false);
+      setTeamNotes(prev => {
+        const remote = lineup.notes?.team?.text || '';
+        if (prev !== remote) return remote;
+        return prev;
+      });
+      setTeamMedia(prev => {
+        const remote = lineup.notes?.team?.media || [];
+        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+        return prev;
+      });
+      setOpponentNotes(prev => {
+        const remote = lineup.notes?.opponent?.text || '';
+        if (prev !== remote) return remote;
+        return prev;
+      });
+      setOpponentMedia(prev => {
+        const remote = lineup.notes?.opponent?.media || [];
+        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+        return prev;
+      });
     } else {
       setLineupName('');
       setTeamName('');
@@ -988,7 +1029,44 @@ export default function LineupBuilder({
       setPitchType('classic');
       setCurrentFormation('');
     }
-  }, [lineup]);
+  }, [lineup, hasUnsavedChanges]);
+
+  // Separate effect to handle "Reset" when unsaved changes was set to false by auto-save
+  useEffect(() => {
+    if (!lineup || !hasUnsavedChanges) return;
+
+    const currentNotes = {
+      team: { text: teamNotes, media: teamMedia },
+      opponent: { text: opponentNotes, media: opponentMedia }
+    };
+    const currentTactical = {
+      drawings: tacticalDrawings,
+      footballPos,
+      opponents,
+      showOpponents
+    };
+
+    const isStillDifferent = 
+      lineup.matchTitle !== lineupName ||
+      (lineup.teamName || '') !== teamName ||
+      lineup.playerScale !== playerScale ||
+      lineup.nameTagStyle !== nameTagStyle ||
+      lineup.nameDisplayMode !== nameDisplayMode ||
+      lineup.showNameBackground !== showNameBackground ||
+      lineup.nameBackgroundType !== nameBackgroundType ||
+      lineup.showPhoto !== showPhoto ||
+      lineup.showNumber !== showNumber ||
+      lineup.teamLogoUrl !== teamLogoUrl ||
+      lineup.formation !== currentFormation ||
+      lineup.pitchType !== pitchType ||
+      JSON.stringify(lineup.players) !== JSON.stringify(players) ||
+      JSON.stringify(lineup.tacticalBoard || {}) !== JSON.stringify(currentTactical) ||
+      JSON.stringify(lineup.notes || {}) !== JSON.stringify(currentNotes);
+
+    if (!isStillDifferent) {
+      setHasUnsavedChanges(false);
+    }
+  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
 
   // Auto-save changes back to the parent
   useEffect(() => {
@@ -1032,10 +1110,16 @@ export default function LineupBuilder({
       showOpponents: true
     };
 
-    const remoteNotes = lineup.notes || {
-      team: { text: '', media: [] },
-      opponent: { text: '', media: [] }
-    };
+      const remoteNotes = {
+        team: { 
+          text: lineup.notes?.team?.text || '', 
+          media: lineup.notes?.team?.media || [] 
+        },
+        opponent: { 
+          text: lineup.notes?.opponent?.text || '', 
+          media: lineup.notes?.opponent?.media || [] 
+        }
+      };
 
     const isDifferent = 
       lineup.matchTitle !== lineupName ||
@@ -1061,8 +1145,7 @@ export default function LineupBuilder({
         ...currentState,
         date: Date.now() // Set new date only when actually pushing changes
       });
-      setHasUnsavedChanges(false);
-    }, 1500); // Debounce for 1.5s (increased from 300ms to save on quota)
+    }, 800); // Reduced from 1500ms to 800ms for snappier feel
     
     return () => clearTimeout(timeout);
   }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
@@ -1143,6 +1226,57 @@ export default function LineupBuilder({
     setShowOpponents(true);
     setHasUnsavedChanges(true);
     setTacticalTool('pen'); // Switch back to pen for convenience
+  };
+
+  const handleMediaUpload = async (file: File, type: 'team' | 'opponent') => {
+    if (!file || !lineup?.id) return;
+    setIsUploadingMedia(true);
+    setUploadError(null);
+    try {
+      // 1MB limit for safety if we were using firestore, but Storage handles more.
+      // However, we check file size just in case.
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("Filen är för stor (max 5MB)");
+      }
+
+      const fileRef = ref(storage, `lineups/${lineup.id}/${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      if (type === 'team') {
+        setTeamMedia(prev => [...prev, url]);
+      } else {
+        setOpponentMedia(prev => [...prev, url]);
+      }
+      setHasUnsavedChanges(true);
+    } catch (err: any) {
+      console.error("Error uploading media:", err);
+      setUploadError(err.message || "Ett fel uppstod vid uppladdning av filen.");
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  };
+
+  const handleMediaDelete = async (url: string, type: 'team' | 'opponent') => {
+    if (!url) return;
+    
+    // Optimistically update local state
+    if (type === 'team') {
+      setTeamMedia(prev => prev.filter(m => m !== url));
+    } else {
+      setOpponentMedia(prev => prev.filter(m => m !== url));
+    }
+    setHasUnsavedChanges(true);
+
+    try {
+      // Create a reference from the URL
+      // Firebase Storage SDK allows creating a ref directly from a download URL
+      const fileRef = ref(storage, url);
+      await deleteObject(fileRef);
+    } catch (err) {
+      console.error("Error deleting media from storage:", err);
+      // We don't necessarily want to revert local state if storage fails (e.g. file already gone)
+      // but we log it for debugging.
+    }
   };
 
   const handleSaveCurrentAsFormation = () => {
@@ -3177,13 +3311,31 @@ export default function LineupBuilder({
             >
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Anteckningar</h3>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Anteckningar</h3>
+                    {hasUnsavedChanges && (
+                      <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full animate-pulse">
+                        <RefreshCw size={12} className="animate-spin" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Sparar...</span>
+                      </div>
+                    )}
+                  </div>
                   <p className="text-sm text-zinc-500 font-medium mt-1">Planera strategier och spela in observationer.</p>
                 </div>
                 <button onClick={() => setShowNotesModal(false)} className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 shadow-sm transition-all active:scale-95">
                   <X size={24} />
                 </button>
               </div>
+
+              {uploadError && (
+                <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm font-bold animate-in fade-in slide-in-from-top-2">
+                  <X size={18} className="shrink-0" />
+                  <p>{uploadError}</p>
+                  <button onClick={() => setUploadError(null)} className="ml-auto p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Team Notes */}
@@ -3195,12 +3347,11 @@ export default function LineupBuilder({
                     <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Vårt Lag</h4>
                   </div>
                   <textarea
+                    ref={teamTextareaRef}
                     value={teamNotes}
                     onChange={(e) => {
                       setTeamNotes(e.target.value);
                       setHasUnsavedChanges(true);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = `${e.target.scrollHeight}px`;
                     }}
                     placeholder="Skriv anteckningar om ditt lag..."
                     style={{ minHeight: '100px' }}
@@ -3212,36 +3363,41 @@ export default function LineupBuilder({
                     <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
                     <div className="grid grid-cols-4 gap-2">
                        {teamMedia.map((url, i) => (
-                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group">
-                           <CachedImage src={url} alt="Media" className="w-full h-full object-cover" />
+                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
+                           {isVideo(url) ? (
+                             <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                               <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
+                             </div>
+                           ) : (
+                             <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                           )}
                            <button 
-                             onClick={() => {
-                               setTeamMedia(prev => prev.filter((_, idx) => idx !== i));
-                               setHasUnsavedChanges(true);
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               handleMediaDelete(url, 'team');
                              }}
-                             className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                             className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
+                             title="Ta bort media"
                            >
-                             <Trash2 size={12} />
+                             <Trash2 size={14} />
                            </button>
                          </div>
                        ))}
-                       <label className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group">
-                         <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
-                         <span className="text-[8px] font-black text-zinc-400 uppercase">Lägg till</span>
+                       <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
+                         {isUploadingMedia ? (
+                           <RefreshCw size={16} className="text-indigo-600 animate-spin" />
+                         ) : (
+                           <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                         )}
+                         <span className="text-[8px] font-black text-zinc-400 uppercase">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
                          <input 
                            type="file" 
                            accept="image/*,video/*" 
                            className="hidden" 
-                           onChange={async (e) => {
+                           disabled={isUploadingMedia}
+                           onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setTeamMedia(prev => [...prev, reader.result as string]);
-                                  setHasUnsavedChanges(true);
-                                };
-                                reader.readAsDataURL(file);
-                              }
+                              if (file) handleMediaUpload(file, 'team');
                            }}
                          />
                        </label>
@@ -3258,12 +3414,11 @@ export default function LineupBuilder({
                     <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Motståndarna</h4>
                   </div>
                   <textarea
+                    ref={opponentTextareaRef}
                     value={opponentNotes}
                     onChange={(e) => {
                       setOpponentNotes(e.target.value);
                       setHasUnsavedChanges(true);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = `${e.target.scrollHeight}px`;
                     }}
                     placeholder="Skriv anteckningar om motståndarna..."
                     style={{ minHeight: '100px' }}
@@ -3275,36 +3430,41 @@ export default function LineupBuilder({
                     <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
                     <div className="grid grid-cols-4 gap-2">
                        {opponentMedia.map((url, i) => (
-                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group">
-                           <CachedImage src={url} alt="Media" className="w-full h-full object-cover" />
+                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
+                           {isVideo(url) ? (
+                             <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                               <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
+                             </div>
+                           ) : (
+                             <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                           )}
                            <button 
-                             onClick={() => {
-                               setOpponentMedia(prev => prev.filter((_, idx) => idx !== i));
-                               setHasUnsavedChanges(true);
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               handleMediaDelete(url, 'opponent');
                              }}
-                             className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                             className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
+                             title="Ta bort media"
                            >
-                             <Trash2 size={12} />
+                             <Trash2 size={14} />
                            </button>
                          </div>
                        ))}
-                       <label className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group">
-                         <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
-                         <span className="text-[8px] font-black text-zinc-400 uppercase">Lägg till</span>
+                       <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
+                         {isUploadingMedia ? (
+                           <RefreshCw size={16} className="text-red-500 animate-spin" />
+                         ) : (
+                           <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                         )}
+                         <span className="text-[8px] font-black text-zinc-400 uppercase">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
                          <input 
                            type="file" 
                            accept="image/*,video/*" 
                            className="hidden" 
-                           onChange={async (e) => {
+                           disabled={isUploadingMedia}
+                           onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setOpponentMedia(prev => [...prev, reader.result as string]);
-                                  setHasUnsavedChanges(true);
-                                };
-                                reader.readAsDataURL(file);
-                              }
+                              if (file) handleMediaUpload(file, 'opponent');
                            }}
                          />
                        </label>
@@ -3316,10 +3476,12 @@ export default function LineupBuilder({
               <div className="mt-12 p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-[32px] border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between">
                  <div className="flex items-center gap-4">
                    <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-indigo-600 shadow-sm">
-                      <Save size={24} />
+                      {hasUnsavedChanges ? <RefreshCw size={24} className="animate-spin" /> : <Save size={24} />}
                    </div>
                    <div>
-                     <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">Ändringar sparas automatiskt</p>
+                     <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">
+                       {hasUnsavedChanges ? 'Sparar ändringar...' : 'Ändringar sparas automatiskt'}
+                     </p>
                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Dina anteckningar är kopplade till denna specifika matchuppställning.</p>
                    </div>
                  </div>
@@ -3329,6 +3491,57 @@ export default function LineupBuilder({
                  >
                    Stäng
                  </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/** Media Viewer Lightbox */}
+        {selectedMediaUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4 sm:p-10"
+            onClick={() => setSelectedMediaUrl(null)}
+          >
+            <button 
+              onClick={() => setSelectedMediaUrl(null)} 
+              className="absolute top-6 right-6 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95 z-[210]"
+            >
+              <X size={24} />
+            </button>
+
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="relative max-w-full max-h-full flex items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isVideo(selectedMediaUrl) ? (
+                <video 
+                  src={selectedMediaUrl} 
+                  controls 
+                  autoPlay 
+                  className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl"
+                />
+              ) : (
+                <CachedImage 
+                  src={selectedMediaUrl} 
+                  alt="Media Viewer" 
+                  className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl" 
+                />
+              )}
+              <div className="absolute top-full mt-6 left-1/2 -translate-x-1/2 flex items-center gap-3">
+                 <a 
+                   href={selectedMediaUrl} 
+                   target="_blank" 
+                   rel="noopener noreferrer"
+                   className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-full text-xs font-black uppercase tracking-widest transition-all backdrop-blur-md flex items-center gap-2"
+                 >
+                   <Play size={14} />
+                   Öppna i fullskärm
+                 </a>
               </div>
             </motion.div>
           </motion.div>
