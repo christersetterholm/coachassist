@@ -6,7 +6,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -165,6 +165,11 @@ export default function LineupBuilder({
   const [isFormationsExpanded, setIsFormationsExpanded] = useState(true);
   const [hoveredPlayerId, setHoveredPlayerId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [teamNotes, setTeamNotes] = useState(lineup?.notes?.team?.text || '');
+  const [teamMedia, setTeamMedia] = useState<string[]>(lineup?.notes?.team?.media || []);
+  const [opponentNotes, setOpponentNotes] = useState(lineup?.notes?.opponent?.text || '');
+  const [opponentMedia, setOpponentMedia] = useState<string[]>(lineup?.notes?.opponent?.media || []);
+  const [showNotesModal, setShowNotesModal] = useState(false);
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [selectedForEdit, setSelectedForEdit] = useState<string | null>(null); // LineupPlayer id
   const [pickerMode, setPickerMode] = useState<'starter' | 'sub' | null>(null);
@@ -961,6 +966,11 @@ export default function LineupBuilder({
         return prev;
       });
 
+      setTeamNotes(lineup.notes?.team?.text || '');
+      setTeamMedia(lineup.notes?.team?.media || []);
+      setOpponentNotes(lineup.notes?.opponent?.text || '');
+      setOpponentMedia(lineup.notes?.opponent?.media || []);
+
       // Crucially, reset the unsaved changes flag when new remote data is applied
       setHasUnsavedChanges(false);
     } else {
@@ -1001,6 +1011,10 @@ export default function LineupBuilder({
       teamLogoUrl,
       pitchType,
       formation: currentFormation,
+      notes: {
+        team: { text: teamNotes, media: teamMedia },
+        opponent: { text: opponentNotes, media: opponentMedia }
+      },
       tacticalBoard: {
         drawings: tacticalDrawings,
         footballPos,
@@ -1018,6 +1032,11 @@ export default function LineupBuilder({
       showOpponents: true
     };
 
+    const remoteNotes = lineup.notes || {
+      team: { text: '', media: [] },
+      opponent: { text: '', media: [] }
+    };
+
     const isDifferent = 
       lineup.matchTitle !== lineupName ||
       (lineup.teamName || '') !== teamName ||
@@ -1032,7 +1051,8 @@ export default function LineupBuilder({
       lineup.formation !== currentFormation ||
       pitchType !== lineup.pitchType ||
       JSON.stringify(lineup.players) !== JSON.stringify(players) ||
-      JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard);
+      JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard) ||
+      JSON.stringify(remoteNotes) !== JSON.stringify(currentState.notes);
 
     if (!isDifferent || !hasUnsavedChanges) return;
 
@@ -1045,7 +1065,7 @@ export default function LineupBuilder({
     }, 1500); // Debounce for 1.5s (increased from 300ms to save on quota)
     
     return () => clearTimeout(timeout);
-  }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, lineup?.id]);
+  }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -1899,20 +1919,20 @@ export default function LineupBuilder({
     <div className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
       {isMaximized && (
         <>
-          <div className="fixed top-6 right-6 z-[100] flex items-center gap-3">
+          <div className="fixed top-3 right-3 z-[100] flex items-center gap-2">
             <button
               onClick={() => setIsControlsVisible(!isControlsVisible)}
-              className="w-14 h-14 bg-zinc-900/80 backdrop-blur-xl text-white rounded-2xl flex items-center justify-center shadow-2xl border border-zinc-800 hover:scale-110 active:scale-95 transition-all group"
+              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
               title={isControlsVisible ? "Dölj verktyg" : "Visa verktyg"}
             >
-              {isControlsVisible ? <EyeOff size={28} /> : <Eye size={28} />}
+              {isControlsVisible ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
             <button
               onClick={() => setIsMaximized(false)}
-              className="w-14 h-14 bg-zinc-900/80 backdrop-blur-xl text-white rounded-2xl flex items-center justify-center shadow-2xl border border-zinc-800 hover:scale-110 active:scale-95 transition-all group"
+              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
               title="Lämna fullskärm"
             >
-              <Minimize2 size={28} className="group-hover:rotate-12 transition-transform" />
+              <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
             </button>
           </div>
 
@@ -1962,6 +1982,13 @@ export default function LineupBuilder({
                   title="Motståndarformation"
                 >
                   <Layout size={20} strokeWidth={2.5} className="text-emerald-500" />
+                </button>
+                <button 
+                  onClick={() => setShowNotesModal(true)}
+                  className="p-2.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all border border-zinc-800/50"
+                  title="Anteckningar"
+                >
+                  <ClipboardList size={20} strokeWidth={2.5} className="text-amber-500" />
                 </button>
                 <button 
                   onClick={() => setTacticalTool('eraser')}
@@ -2158,18 +2185,7 @@ export default function LineupBuilder({
               {/* Mode & Global Actions Group */}
             <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex-nowrap overflow-x-auto no-scrollbar">
               <button
-                onClick={() => setIsEditMode(false)}
-                className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                  !isEditMode 
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-transparent'
-                }`}
-                title="Flytta spelare"
-              >
-                <Crosshair size={20} />
-              </button>
-              <button
-                onClick={() => setIsEditMode(true)}
+                onClick={() => setIsEditMode(!isEditMode)}
                 className={`p-2.5 rounded-xl transition-all shrink-0 ${
                   isEditMode 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
@@ -2178,6 +2194,13 @@ export default function LineupBuilder({
                 title="Redigera spelare"
               >
                 <Edit2 size={20} />
+              </button>
+              <button
+                onClick={() => setShowNotesModal(true)}
+                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-400 rounded-xl border border-transparent shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0"
+                title="Anteckningar"
+              >
+                <ClipboardList size={20} />
               </button>
               <button
                 onClick={handleUndo}
@@ -3131,6 +3154,181 @@ export default function LineupBuilder({
                     </div>
                   </div>
                 ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/** Notes & Media Modal */}
+        {showNotesModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
+            onClick={() => setShowNotesModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Anteckningar</h3>
+                  <p className="text-sm text-zinc-500 font-medium mt-1">Planera strategier och spela in observationer.</p>
+                </div>
+                <button onClick={() => setShowNotesModal(false)} className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 shadow-sm transition-all active:scale-95">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Team Notes */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600">
+                      <Trophy size={20} />
+                    </div>
+                    <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Vårt Lag</h4>
+                  </div>
+                  <textarea
+                    value={teamNotes}
+                    onChange={(e) => {
+                      setTeamNotes(e.target.value);
+                      setHasUnsavedChanges(true);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${e.target.scrollHeight}px`;
+                    }}
+                    placeholder="Skriv anteckningar om ditt lag..."
+                    style={{ minHeight: '100px' }}
+                    className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-indigo-500 transition-all outline-none text-sm resize-none overflow-hidden"
+                  />
+                  
+                  {/* Media Upload */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
+                    <div className="grid grid-cols-4 gap-2">
+                       {teamMedia.map((url, i) => (
+                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group">
+                           <CachedImage src={url} alt="Media" className="w-full h-full object-cover" />
+                           <button 
+                             onClick={() => {
+                               setTeamMedia(prev => prev.filter((_, idx) => idx !== i));
+                               setHasUnsavedChanges(true);
+                             }}
+                             className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                           >
+                             <Trash2 size={12} />
+                           </button>
+                         </div>
+                       ))}
+                       <label className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group">
+                         <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                         <span className="text-[8px] font-black text-zinc-400 uppercase">Lägg till</span>
+                         <input 
+                           type="file" 
+                           accept="image/*,video/*" 
+                           className="hidden" 
+                           onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setTeamMedia(prev => [...prev, reader.result as string]);
+                                  setHasUnsavedChanges(true);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                           }}
+                         />
+                       </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Opponent Notes */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600">
+                      <Target size={20} />
+                    </div>
+                    <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Motståndarna</h4>
+                  </div>
+                  <textarea
+                    value={opponentNotes}
+                    onChange={(e) => {
+                      setOpponentNotes(e.target.value);
+                      setHasUnsavedChanges(true);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${e.target.scrollHeight}px`;
+                    }}
+                    placeholder="Skriv anteckningar om motståndarna..."
+                    style={{ minHeight: '100px' }}
+                    className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-red-500 transition-all outline-none text-sm resize-none overflow-hidden"
+                  />
+
+                  {/* Media Upload */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
+                    <div className="grid grid-cols-4 gap-2">
+                       {opponentMedia.map((url, i) => (
+                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group">
+                           <CachedImage src={url} alt="Media" className="w-full h-full object-cover" />
+                           <button 
+                             onClick={() => {
+                               setOpponentMedia(prev => prev.filter((_, idx) => idx !== i));
+                               setHasUnsavedChanges(true);
+                             }}
+                             className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                           >
+                             <Trash2 size={12} />
+                           </button>
+                         </div>
+                       ))}
+                       <label className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group">
+                         <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                         <span className="text-[8px] font-black text-zinc-400 uppercase">Lägg till</span>
+                         <input 
+                           type="file" 
+                           accept="image/*,video/*" 
+                           className="hidden" 
+                           onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setOpponentMedia(prev => [...prev, reader.result as string]);
+                                  setHasUnsavedChanges(true);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                           }}
+                         />
+                       </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-12 p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-[32px] border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between">
+                 <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-indigo-600 shadow-sm">
+                      <Save size={24} />
+                   </div>
+                   <div>
+                     <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">Ändringar sparas automatiskt</p>
+                     <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Dina anteckningar är kopplade till denna specifika matchuppställning.</p>
+                   </div>
+                 </div>
+                 <button 
+                  onClick={() => setShowNotesModal(false)}
+                  className="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
+                 >
+                   Stäng
+                 </button>
               </div>
             </motion.div>
           </motion.div>

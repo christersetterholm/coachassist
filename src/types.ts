@@ -32,6 +32,16 @@ export interface Lineup {
   isArchived?: boolean;
   teamLogoUrl?: string;
   pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass';
+  notes?: {
+    team?: {
+      text: string;
+      media?: string[];
+    };
+    opponent?: {
+      text: string;
+      media?: string[];
+    };
+  };
   tacticalBoard?: {
     drawings: any[];
     footballPos: { x: number, y: number } | null;
