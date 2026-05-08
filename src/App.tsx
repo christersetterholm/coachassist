@@ -1866,46 +1866,46 @@ export default function App() {
                         <Zap size={14} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
                         <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Jokrar:</span>
                         <div className="flex gap-1">
-                          {activeExercise.jokerPlayerIds.map(id => {
-                            const player = squad.find(p => p.id === id);
-                            return (
-                              <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
-                                {player?.name}
-                              </span>
-                            );
-                          })}
-                        </div>
+                        {Array.from(new Set(activeExercise.jokerPlayerIds || [])).map(id => {
+                          const player = squad.find(p => p.id === id);
+                          return (
+                            <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
+                              {player?.name}
+                            </span>
+                          );
+                        })}
                       </div>
-                    )}
-                  </div>
-                  <div className="w-full max-w-sm">
-                    <Timer 
-                      defaultMinutes={activeExercise.defaultTimerMinutes} 
-                      defaultSeconds={activeExercise.defaultTimerSeconds} 
-                      onSaveDefault={updateActiveExerciseDefaultTimer}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {!activeExercise.showTimer && activeExercise.jokerPlayerIds && activeExercise.jokerPlayerIds.length > 0 && (
-                <div className="mb-6 flex justify-center flex-wrap gap-2">
-                  <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shadow-sm">
-                    <Zap size={14} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
-                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Jokrar:</span>
-                    <div className="flex gap-1">
-                      {activeExercise.jokerPlayerIds.map(id => {
-                        const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
-                        const guestsForExercise = exerciseSession?.guestPlayers || [];
-                        const combinedExerciseSquad = [...squad, ...guestsForExercise];
-                        const player = combinedExerciseSquad.find(p => p.id === id);
-                        return (
-                          <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
-                            {player?.name}
-                          </span>
-                        );
-                      })}
                     </div>
+                  )}
+                </div>
+                <div className="w-full max-w-sm">
+                  <Timer 
+                    defaultMinutes={activeExercise.defaultTimerMinutes} 
+                    defaultSeconds={activeExercise.defaultTimerSeconds} 
+                    onSaveDefault={updateActiveExerciseDefaultTimer}
+                  />
+                </div>
+              </div>
+            )}
+
+            {!activeExercise.showTimer && activeExercise.jokerPlayerIds && activeExercise.jokerPlayerIds.length > 0 && (
+              <div className="mb-6 flex justify-center flex-wrap gap-2">
+                <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shadow-sm">
+                  <Zap size={14} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Jokrar:</span>
+                  <div className="flex gap-1">
+                    {Array.from(new Set(activeExercise.jokerPlayerIds || [])).map(id => {
+                      const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
+                      const guestsForExercise = exerciseSession?.guestPlayers || [];
+                      const combinedExerciseSquad = [...squad, ...guestsForExercise];
+                      const player = combinedExerciseSquad.find(p => p.id === id);
+                      return (
+                        <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
+                          {player?.name}
+                        </span>
+                      );
+                    })}
+                  </div>
                   </div>
                 </div>
               )}

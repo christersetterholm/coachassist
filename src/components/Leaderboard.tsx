@@ -200,7 +200,7 @@ export default function Leaderboard({
     onUpdatePeriod(period.id, { bonusPoints: updatedBonusPoints });
   };
 
-  const finalStats = sharedData 
+  const finalStats = (sharedData 
     ? sharedData.standings.map((s: any) => ({
         id: s.playerId,
         name: s.playerName,
@@ -208,7 +208,9 @@ export default function Leaderboard({
         totalPoints: s.points,
         history: s.history || []
       }))
-    : displayStats;
+    : displayStats).filter((player: any, index: number, self: any[]) => 
+      index === self.findIndex((p) => p.id === player.id)
+    );
 
   const togglePlayer = (playerId: string) => {
     const newExpanded = new Set(expandedPlayers);
@@ -353,7 +355,7 @@ export default function Leaderboard({
                       className="w-full bg-transparent border-none text-zinc-900 dark:text-white font-black text-xl sm:text-2xl focus:ring-0 outline-none cursor-pointer hover:text-indigo-600 transition-colors p-0 appearance-none pr-8"
                     >
                       <option value="current" disabled>Välj tävling...</option>
-                      {periods.map(p => (
+                      {periods.filter((p, index, self) => index === self.findIndex(t => t.id === p.id)).map(p => (
                         <option key={p.id} value={p.id}>
                           {p.name} {p.isActive ? '(Aktiv)' : p.endDate ? '(Avslutad)' : ''}
                         </option>

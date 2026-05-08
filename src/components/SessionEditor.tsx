@@ -1494,7 +1494,7 @@ function ParticipantManager({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {squad.map(player => {
+          {Array.from(new Map(squad.map(p => [p.id, p])).values()).map(player => {
             const isPresent = attendance.includes(player.id);
             return (
               <button
@@ -1555,7 +1555,7 @@ function ParticipantManager({
         </form>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {guestPlayers.map(guest => {
+          {Array.from(new Map(guestPlayers.map(p => [p.id, p])).values()).map(guest => {
             const isPresent = attendance.includes(guest.id);
             return (
               <div
@@ -1599,7 +1599,7 @@ function ParticipantManager({
         <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
           <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Manuellt inlagda (historiskt)</h4>
           <div className="flex flex-wrap gap-2">
-            {attendance.filter(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)).map(idOrName => (
+            {Array.from(new Set(attendance.filter(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)))).map(idOrName => (
               <div key={idOrName} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700">
                 <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">
                   {idOrName.startsWith('guest_') ? 'Okänd provspelare' : idOrName}
