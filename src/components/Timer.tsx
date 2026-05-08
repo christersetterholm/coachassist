@@ -18,6 +18,50 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
   const [isMuted, setIsMuted] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [showSavedFeedback, setShowSavedFeedback] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  
+  // Ref to track the absolute end time
+  const endTimeRef = useRef<number | null>(null);
+  // Ref to track the total duration when paused/stopped
+  const remainingSecondsRef = useRef<number>(defaultMinutes * 60 + defaultSeconds);
+  // Ref for the main timer loop
+  const timerIntervalRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<any>(null);
+  const keepAliveOscRef = useRef<OscillatorNode | null>(null);
+
+  // Check notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    }
+  };
+
+  // Request wake lock to keep screen on
+  const requestWakeLock = async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      } catch (err) {
+        console.warn('Wake Lock request failed:', err);
+      }
+    }
+  };
+
+  const releaseWakeLock = () => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release()
+        .then(() => {
+          wakeLockRef.current = null;
+        });
+    }
+  };
 
   // Update timer when default props change (e.g. switching games)
   useEffect(() => {
@@ -26,6 +70,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
       setSeconds(defaultSeconds);
       setPresetMinutes(defaultMinutes);
       setPresetSeconds(defaultSeconds);
+      remainingSecondsRef.current = defaultMinutes * 60 + defaultSeconds;
     }
   }, [defaultMinutes, defaultSeconds, isStarted]);
 
@@ -41,37 +86,71 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
       if (alarmIntervalRef.current) {
         window.clearInterval(alarmIntervalRef.current);
       }
+      if (timerIntervalRef.current) {
+        window.clearInterval(timerIntervalRef.current);
+      }
+      stopKeepAlive();
+      releaseWakeLock();
     };
   }, []);
 
-  useEffect(() => {
-    let interval: number | undefined;
+  const syncTimer = () => {
+    if (!isActive || !endTimeRef.current) return;
 
-    if (isActive && totalSeconds > 0) {
-      interval = window.setInterval(() => {
-        setSeconds(prevSeconds => {
-          if (prevSeconds > 0) return prevSeconds - 1;
-          
-          setMinutes(prevMinutes => {
-            if (prevMinutes > 0) {
-              return prevMinutes - 1;
-            }
-            return 0;
-          });
-          return 59;
-        });
-      }, 1000);
-    } else if (totalSeconds === 0 && isActive) {
-      setIsActive(false);
-      setIsStarted(false);
-      setIsFinished(true);
-      if (!isMuted) {
-        playAlarm();
+    const now = Date.now();
+    const remaining = Math.max(0, Math.ceil((endTimeRef.current - now) / 1000));
+    
+    if (remaining !== remainingSecondsRef.current) {
+      remainingSecondsRef.current = remaining;
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      setMinutes(m);
+      setSeconds(s);
+
+      if (remaining === 0) {
+        setIsActive(false);
+        setIsStarted(false);
+        setIsFinished(true);
+        if (!isMuted) {
+          playAlarm();
+        }
+        if (timerIntervalRef.current) {
+          window.clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = null;
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isActive) {
+      // Use a more frequent interval to catch the precise second change
+      timerIntervalRef.current = window.setInterval(syncTimer, 200);
+    } else {
+      if (timerIntervalRef.current) {
+        window.clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
     }
 
-    return () => clearInterval(interval);
-  }, [isActive, totalSeconds, isMuted]);
+    return () => {
+      if (timerIntervalRef.current) {
+        window.clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [isActive, isMuted]);
+
+  // Sync when coming back to the tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isActive) {
+        syncTimer();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isActive]);
 
   const initAudio = () => {
     if (!audioContextRef.current) {
@@ -80,12 +159,48 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
+    
+    // Start a silent oscillator to keep the audio process alive on mobile
+    if (!keepAliveOscRef.current && audioContextRef.current) {
+      const g = audioContextRef.current.createGain();
+      g.gain.setValueAtTime(0.0001, audioContextRef.current.currentTime);
+      const osc = audioContextRef.current.createOscillator();
+      osc.connect(g);
+      g.connect(audioContextRef.current.destination);
+      osc.start();
+      keepAliveOscRef.current = osc;
+    }
+  };
+
+  const stopKeepAlive = () => {
+    if (keepAliveOscRef.current) {
+      try {
+        keepAliveOscRef.current.stop();
+        keepAliveOscRef.current.disconnect();
+      } catch (e) {
+        // Ignore if already stopped
+      }
+      keepAliveOscRef.current = null;
+    }
   };
 
   const playAlarm = () => {
     initAudio();
     if (!audioContextRef.current) return;
     
+    if (notificationPermission === 'granted' && document.visibilityState !== 'visible') {
+      try {
+        new Notification('Tiden är ute!', {
+          body: 'Tävlingsmomentet har räknat ner till noll.',
+          icon: '/favicon.ico',
+          tag: 'timer-alarm',
+          silent: false
+        });
+      } catch (e) {
+        console.warn('Could not show notification:', e);
+      }
+    }
+
     // Safety check: clear any existing interval before starting a new one
     if (alarmIntervalRef.current) {
       window.clearInterval(alarmIntervalRef.current);
@@ -138,6 +253,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     }
     setIsFinished(false);
     resetToPreset();
+    releaseWakeLock();
   };
 
   const toggleMute = () => {
@@ -161,12 +277,35 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
       stopAlarm();
       return;
     }
+    
     if (!isStarted && totalSeconds > 0) {
       setIsStarted(true);
       setPresetMinutes(minutes);
       setPresetSeconds(seconds);
+      remainingSecondsRef.current = totalSeconds;
     }
-    setIsActive(!isActive);
+
+    const newActiveState = !isActive;
+    if (newActiveState) {
+      // Request permission on start if not already asked
+      requestNotificationPermission();
+      
+      // Calculate end time based on CURRENT remaining seconds
+      endTimeRef.current = Date.now() + (remainingSecondsRef.current * 1000);
+      requestWakeLock();
+      initAudio(); // Ensure audio context is ready
+    } else {
+      // Store exact remaining time when pausing
+      if (endTimeRef.current) {
+        const now = Date.now();
+        remainingSecondsRef.current = Math.max(0, Math.ceil((endTimeRef.current - now) / 1000));
+        endTimeRef.current = null;
+      }
+      releaseWakeLock();
+      stopKeepAlive();
+    }
+    
+    setIsActive(newActiveState);
   };
 
   const resetToPreset = () => {
@@ -175,6 +314,10 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     setIsFinished(false);
     setMinutes(presetMinutes);
     setSeconds(presetSeconds);
+    remainingSecondsRef.current = presetMinutes * 60 + presetSeconds;
+    endTimeRef.current = null;
+    releaseWakeLock();
+    stopKeepAlive();
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
@@ -189,6 +332,10 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     setSeconds(defaultSeconds);
     setPresetMinutes(defaultMinutes);
     setPresetSeconds(defaultSeconds);
+    remainingSecondsRef.current = defaultMinutes * 60 + defaultSeconds;
+    endTimeRef.current = null;
+    releaseWakeLock();
+    stopKeepAlive();
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
@@ -231,6 +378,9 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
       setPresetMinutes(nextMin);
       setPresetSeconds(nextSec);
     }
+    remainingSecondsRef.current = (type === 'min' ? Math.max(0, minutes + amount) : minutes) * 60 + (type === 'sec' ? seconds + amount : seconds);
+    // Boundary check for remainingSecondsRef
+    if (remainingSecondsRef.current < 0) remainingSecondsRef.current = 0;
   };
 
   const quickAdd = (mins: number) => {
@@ -238,6 +388,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     const next = Math.min(99, minutes + mins);
     setMinutes(next);
     setPresetMinutes(next);
+    remainingSecondsRef.current = next * 60 + seconds;
   };
 
   const formatTime = (m: number, s: number) => {
@@ -252,6 +403,11 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
     }`}>
       <div className="flex flex-col gap-3">
         {/* Main Display & Top Controls */}
+        {notificationPermission === 'denied' && !isStarted && (
+          <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-xl border border-amber-100 dark:border-amber-800 text-center">
+            Aviseringar blockerade - tillåt dem för alarm vid låst skärm
+          </div>
+        )}
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className={`font-black text-zinc-900 dark:text-white tabular-nums leading-none transition-all duration-300 ${

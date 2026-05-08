@@ -220,6 +220,7 @@ export default function LineupBuilder({
   const [footballPos, setFootballPos] = useState<{ x: number, y: number } | null>(lineup?.tacticalBoard?.footballPos || null);
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
+  const [opponentColor, setOpponentColor] = useState(lineup?.tacticalBoard?.opponentColor || '#ef4444');
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number, y: number }[]>([]);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -332,6 +333,7 @@ export default function LineupBuilder({
       setFootballPos(lineup.tacticalBoard?.footballPos || null);
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
+      setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
       
       currentIdRef.current = lineup.id;
       setHasUnsavedChanges(false);
@@ -413,6 +415,7 @@ export default function LineupBuilder({
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
         showOpponents,
+        opponentColor,
         formation: currentFormation
       };
       const newHistory = [...currentHistory, snapshot];
@@ -420,7 +423,7 @@ export default function LineupBuilder({
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0) return;
@@ -443,6 +446,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      opponentColor,
       formation: currentFormation
     };
     
@@ -468,9 +472,10 @@ export default function LineupBuilder({
     setOpponents(last.opponents);
     setTacticalDrawings(last.tacticalDrawings);
     setShowOpponents(last.showOpponents);
+    setOpponentColor(last.opponentColor || '#ef4444');
     setCurrentFormation(last.formation);
     setHasUnsavedChanges(true);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     if (future.length === 0) return;
@@ -493,6 +498,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      opponentColor,
       formation: currentFormation
     };
     
@@ -518,9 +524,10 @@ export default function LineupBuilder({
     setOpponents(next.opponents);
     setTacticalDrawings(next.tacticalDrawings);
     setShowOpponents(next.showOpponents);
+    setOpponentColor(next.opponentColor || '#ef4444');
     setCurrentFormation(next.formation);
     setHasUnsavedChanges(true);
-  }, [currentId, future, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, currentFormation]);
+  }, [currentId, future, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) return;
@@ -1134,7 +1141,8 @@ export default function LineupBuilder({
         drawings: tacticalDrawings,
         footballPos,
         opponents,
-        showOpponents
+        showOpponents,
+        opponentColor
       }
     };
 
@@ -1144,7 +1152,8 @@ export default function LineupBuilder({
       drawings: [],
       footballPos: null,
       opponents: [],
-      showOpponents: true
+      showOpponents: true,
+      opponentColor: '#ef4444'
     };
 
       const remoteNotes = {
@@ -1185,7 +1194,7 @@ export default function LineupBuilder({
     }, 800); // Reduced from 1500ms to 800ms for snappier feel
     
     return () => clearTimeout(timeout);
-  }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
+  }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -1717,8 +1726,13 @@ export default function LineupBuilder({
                 height: `${playerScale * 50}px`,
               }}
             >
-              <div className="w-full h-full bg-zinc-800 rounded-full flex items-center justify-center shadow-lg border border-zinc-900 border-dashed">
-                <Shirt size={playerScale * 24} className="text-zinc-400" />
+              <div className="w-full h-full flex items-center justify-center">
+                <Shirt 
+                  size={playerScale * 40} 
+                  style={{ color: opponentColor }}
+                  fill="currentColor"
+                  className="drop-shadow-md"
+                />
               </div>
             </div>
           ))}
@@ -2267,10 +2281,21 @@ export default function LineupBuilder({
 
               <div className="flex items-center gap-4">
                 {/* Colors */}
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setTacticalColor('#ffffff')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ffffff' ? 'border-indigo-500 scale-110' : 'border-white bg-white'}`} style={{ backgroundColor: '#ffffff' }} />
-                  <button onClick={() => setTacticalColor('#ef4444')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ef4444' ? 'border-indigo-500 scale-110' : 'border-red-500'}`} style={{ backgroundColor: '#ef4444' }} />
-                  <button onClick={() => setTacticalColor('#facc15')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#facc15' ? 'border-indigo-500 scale-110' : 'border-yellow-400'}`} style={{ backgroundColor: '#facc15' }} />
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 pr-4 border-r border-zinc-800">
+                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Penna</span>
+                    <button onClick={() => setTacticalColor('#ffffff')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ffffff' ? 'border-indigo-500 scale-110' : 'border-white bg-white'}`} style={{ backgroundColor: '#ffffff' }} />
+                    <button onClick={() => setTacticalColor('#ef4444')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ef4444' ? 'border-indigo-500 scale-110' : 'border-red-500'}`} style={{ backgroundColor: '#ef4444' }} />
+                    <button onClick={() => setTacticalColor('#facc15')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#facc15' ? 'border-indigo-500 scale-110' : 'border-yellow-400'}`} style={{ backgroundColor: '#facc15' }} />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Motståndare</span>
+                    <button onClick={() => { setOpponentColor('#ef4444'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#ef4444' ? 'border-indigo-500 scale-110' : 'border-red-500/50'}`} style={{ backgroundColor: '#ef4444' }} />
+                    <button onClick={() => { setOpponentColor('#ffffff'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#ffffff' ? 'border-indigo-500 scale-110' : 'border-white/50'}`} style={{ backgroundColor: '#ffffff' }} />
+                    <button onClick={() => { setOpponentColor('#3b82f6'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#3b82f6' ? 'border-indigo-500 scale-110' : 'border-blue-500/50'}`} style={{ backgroundColor: '#3b82f6' }} />
+                    <button onClick={() => { setOpponentColor('#18181b'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#18181b' ? 'border-indigo-500 scale-110' : 'border-zinc-800'}`} style={{ backgroundColor: '#18181b' }} />
+                  </div>
                 </div>
 
                 {/* Actions */}

@@ -47,6 +47,7 @@ export interface Lineup {
     footballPos: { x: number, y: number } | null;
     opponents: { id: string, x: number, y: number }[];
     showOpponents: boolean;
+    opponentColor?: string;
   };
 }
 
@@ -62,6 +63,7 @@ export interface PeriodStandings {
   playerId: string;
   playerName: string;
   points: number;
+  photoUrl?: string | null;
 }
 
 export interface BonusPoint {
@@ -108,7 +110,10 @@ export interface TrainingSession {
   endTime?: string; // Optional
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
+  guestPlayers?: SquadPlayer[];
   isCompleted?: boolean;
+  isStarted?: boolean;
+  actualStartTime?: number;
   notes?: string;
   createdAt: number;
   updatedAt: number;
@@ -210,4 +215,12 @@ export const PRESET_COLORS = [
   "#1e3a8a", // blue-900 (navy)
   "#18181b", // zinc-950
   "#ffffff", // white
+];
+
+export const VEST_COLORS = [
+  '#1E3A8A', // Navy (Tröjfärg)
+  '#84CC16', // Lime
+  '#0EA5E9', // Sky
+  '#F97316', // Orange
+  '#71717A', // Zinc
 ];

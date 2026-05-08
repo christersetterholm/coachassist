@@ -38,6 +38,7 @@ interface MomentItemProps {
   onShowTeams?: (id: string) => void;
   onViewImage?: (urls: string[], index: number) => void;
   setConfirmDeleteExercise: (info: { exerciseId: string, momentId: string, name: string } | null) => void;
+  sessionTitle?: string;
   key?: string;
 }
 
@@ -47,6 +48,7 @@ function MomentItem({
   mode, 
   exercises, 
   sessionDate,
+  sessionTitle,
   updateMoment, 
   removeMoment, 
   setConfirmDeleteMoment,
@@ -200,14 +202,14 @@ function MomentItem({
               {mode === 'plan' ? (
                 <input
                   type="text"
-                  value={moment.name}
+                  value={moment.name || ''}
                   onChange={(e) => updateMoment(moment.id, { name: e.target.value })}
                   className="w-full bg-transparent border-none p-0 text-lg font-black text-zinc-900 dark:text-white focus:ring-0"
                   placeholder="Namn på moment..."
                 />
               ) : (
                 <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight break-words">
-                  {moment.name || 'Namnlöst moment'}
+                  {moment.name || sessionTitle || 'Namnlöst moment'}
                 </h4>
               )}
             </div>
@@ -237,7 +239,7 @@ function MomentItem({
               ref={textareaRef}
               value={moment.description || ''}
               onChange={(e) => updateMoment(moment.id, { description: e.target.value })}
-              className="w-full bg-transparent border-none p-0 text-sm text-zinc-500 dark:text-zinc-400 focus:ring-0 resize-none overflow-hidden min-h-[40px]"
+              className="w-full bg-transparent border-none p-0 text-base text-zinc-500 dark:text-zinc-400 focus:ring-0 resize-none overflow-hidden min-h-[40px]"
               placeholder="Beskriv vad som ska göras i det här momentet..."
               rows={1}
             />
@@ -319,7 +321,7 @@ function MomentItem({
                         <div className="flex flex-wrap gap-2 px-1">
                           {moment.imageUrl && (
                             <div className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                              <img src={moment.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <img src={moment.imageUrl} className="w-full h-full object-cover" />
                               <button
                                 type="button"
                                 onClick={() => updateMoment(moment.id, { imageUrl: undefined })}
@@ -331,7 +333,7 @@ function MomentItem({
                           )}
                           {moment.imageUrls?.map((url, idx) => (
                             <div key={idx} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                              <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <img src={url} className="w-full h-full object-cover" />
                               <button
                                 type="button"
                                 onClick={() => {
@@ -371,7 +373,7 @@ function MomentItem({
                             type="url"
                             value={moment.externalLink || ''}
                             onChange={(e) => updateMoment(moment.id, { externalLink: e.target.value })}
-                            className="flex-1 bg-transparent border-none p-0 text-xs font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
+                            className="flex-1 bg-transparent border-none p-0 text-base font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
                             placeholder="Externt klipp eller länk (t.ex. YouTube)..."
                           />
                           {moment.externalLink && (
@@ -406,7 +408,6 @@ function MomentItem({
                         src={moment.imageUrl} 
                         alt="Beskrivande bild"
                         className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
                       />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
                         <Maximize2 size={24} className="text-white opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all" />
@@ -428,7 +429,6 @@ function MomentItem({
                         src={url} 
                         alt={`Beskrivande bild ${idx + 1}`}
                         className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
                       />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
                         <Maximize2 size={24} className="text-white opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all" />
@@ -521,7 +521,8 @@ function MomentItem({
                     onClick={() => {
                       const dateObj = new Date(sessionDate);
                       const dateStr = `${dateObj.getDate()}/${dateObj.getMonth() + 1} -${dateObj.getFullYear().toString().slice(-2)}`;
-                      const exerciseName = `${moment.name || 'Nytt tävlingsmoment'} - ${dateStr}`;
+                      const baseName = (moment.name && moment.name.trim()) || sessionTitle || 'Nytt tävlingsmoment';
+                      const exerciseName = `${baseName} - ${dateStr}`;
                       onCreateExercise(exerciseName, moment.id);
                     }}
                     className="flex items-center gap-1 text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-2 py-1.5 rounded-lg transition-colors border border-indigo-100 dark:border-indigo-900/30 shadow-sm"
@@ -762,7 +763,7 @@ export default function SessionEditor({
         {selectedExerciseForTeams && currentExercise && (
           <TeamOverviewModal
             exercise={currentExercise}
-            squad={squad || []}
+            squad={[...(squad || []), ...(session.guestPlayers || [])]}
             onMovePlayer={onMovePlayer || (() => {})}
             onClose={() => setSelectedExerciseForTeams(null)}
             onStart={() => {
@@ -841,7 +842,7 @@ export default function SessionEditor({
 
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 sticky top-0 z-50">
-        <div className="px-4 py-2 sm:py-3 flex items-center gap-3">
+        <div className="max-w-4xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
           <button 
             onClick={onClose}
             className="p-2 -ml-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
@@ -874,7 +875,7 @@ export default function SessionEditor({
           </button>
         </div>
 
-        <div className="px-4 pb-3 flex flex-col gap-2">
+        <div className="max-w-4xl mx-auto px-4 pb-3 flex flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -984,7 +985,7 @@ export default function SessionEditor({
                     type="date"
                     value={new Date(session.date).toISOString().split('T')[0]}
                     onChange={(e) => onUpdate({ ...session, date: new Date(e.target.value).getTime() })}
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>
                 
@@ -995,7 +996,7 @@ export default function SessionEditor({
                       type="time"
                       value={session.startTime}
                       onChange={(e) => onUpdate({ ...session, startTime: e.target.value })}
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
                   <div>
@@ -1004,7 +1005,7 @@ export default function SessionEditor({
                       type="time"
                       value={session.endTime || calculatedEndTime}
                       onChange={(e) => onUpdate({ ...session, endTime: e.target.value })}
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
                 </div>
@@ -1041,7 +1042,7 @@ export default function SessionEditor({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto p-4 sm:p-6"
       >
-        <div className="w-full max-w-2xl mx-auto space-y-6">
+        <div className="w-full max-w-4xl mx-auto space-y-6">
           {activeTab === 'schema' ? (
             <>
               {/* Notes Section */}
@@ -1086,7 +1087,7 @@ export default function SessionEditor({
                             value={session.notes || ''}
                             onChange={(e) => onUpdate({ ...session, notes: e.target.value, updatedAt: Date.now() })}
                             placeholder="Skriv in mål, syfte eller anteckningar för träningen..."
-                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium overflow-hidden"
+                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-base text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium overflow-hidden"
                             rows={1}
                           />
                         ) : (
@@ -1144,6 +1145,32 @@ export default function SessionEditor({
                   <ListTodo size={16} />
                   Schema ({totalPlannedMinutes} minuter)
                 </h3>
+                {mode === 'live' && !session.isStarted && (
+                  <button
+                    onClick={() => {
+                      if ('Notification' in window && Notification.permission === 'default') {
+                        Notification.requestPermission();
+                      }
+                      onUpdate({ ...session, isStarted: true, actualStartTime: Date.now(), updatedAt: Date.now() });
+                    }}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
+                  >
+                    <Play size={14} fill="currentColor" />
+                    Starta passet (aktiverar notiser)
+                  </button>
+                )}
+                {mode === 'live' && session.isStarted && (
+                   <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl">
+                     <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                     <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Passet är igång</span>
+                     <button
+                        onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
+                        className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase"
+                     >
+                        Nollställ
+                     </button>
+                   </div>
+                )}
                 {mode === 'plan' && (
                   <motion.button
                     whileTap={{ scale: 0.95 }}
@@ -1165,6 +1192,7 @@ export default function SessionEditor({
                     mode={mode}
                     exercises={exercises}
                     sessionDate={session.date}
+                    sessionTitle={session.title}
                     updateMoment={updateMoment}
                     removeMoment={removeMoment}
                     onCreateExercise={onCreateExercise}
@@ -1225,7 +1253,7 @@ export default function SessionEditor({
             <ParticipantManager 
               session={session} 
               squad={squad} 
-              onUpdate={(updatedAttendance) => onUpdate({ ...session, attendance: updatedAttendance, updatedAt: Date.now() })} 
+              onUpdate={onUpdate}
             />
           )}
           
@@ -1328,21 +1356,51 @@ export default function SessionEditor({
 function ParticipantManager({ 
   session, 
   squad, 
-  onUpdate 
+  onUpdate, 
 }: { 
   session: TrainingSession, 
   squad: SquadPlayer[], 
-  onUpdate: (updated: string[]) => void 
+  onUpdate: (updated: TrainingSession) => void
 }) {
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
+  const [guestName, setGuestName] = useState("");
   const attendance = session.attendance || [];
+  const guestPlayers = session.guestPlayers || [];
 
   const handleTogglePlayer = (id: string) => {
     const newAttendance = attendance.includes(id)
       ? attendance.filter(pid => pid !== id)
       : [...attendance, id];
-    onUpdate(newAttendance);
+    onUpdate({ ...session, attendance: newAttendance, updatedAt: Date.now() });
+  };
+
+  const handleAddGuest = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!guestName.trim()) return;
+
+    const newGuest: SquadPlayer = {
+      id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      name: guestName.trim(),
+    };
+
+    // Update both in one go to ensure consistency and prevent state overwrite
+    onUpdate({
+      ...session,
+      guestPlayers: [...guestPlayers, newGuest],
+      attendance: [...attendance, newGuest.id],
+      updatedAt: Date.now()
+    });
+    setGuestName("");
+  };
+
+  const removeGuest = (id: string) => {
+    onUpdate({
+      ...session,
+      guestPlayers: guestPlayers.filter(p => p.id !== id),
+      attendance: attendance.filter(pid => pid !== id),
+      updatedAt: Date.now()
+    });
   };
 
   const handlePaste = () => {
@@ -1350,7 +1408,6 @@ function ParticipantManager({
     const parsedNames = lines
       .map(line => {
         let trimmed = line.trim();
-        // Specifically handle laget.se where "Deltar" is appended to name or its own line
         if (trimmed.endsWith(' Deltar')) {
           trimmed = trimmed.substring(0, trimmed.length - 7).trim();
         }
@@ -1361,96 +1418,194 @@ function ParticipantManager({
         return name.length > 0 && lower !== 'deltar' && lower !== 'deltar:';
       });
 
-    const matchedIds = parsedNames.map(name => {
-      const found = squad.find(p => p.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(p.name.toLowerCase()));
-      return found ? found.id : name;
+    const newAttendance = [...attendance];
+    const newGuestPlayers = [...guestPlayers];
+
+    parsedNames.forEach(name => {
+      const foundInSquad = squad.find(p => p.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(p.name.toLowerCase()));
+      if (foundInSquad) {
+        if (!newAttendance.includes(foundInSquad.id)) {
+          newAttendance.push(foundInSquad.id);
+        }
+      } else {
+        const foundInGuests = newGuestPlayers.find(p => p.name.toLowerCase() === name.toLowerCase());
+        if (foundInGuests) {
+          if (!newAttendance.includes(foundInGuests.id)) {
+            newAttendance.push(foundInGuests.id);
+          }
+        } else {
+          // Create new guest
+          const guest: SquadPlayer = {
+            id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            name: name
+          };
+          newGuestPlayers.push(guest);
+          newAttendance.push(guest.id);
+        }
+      }
     });
 
-    const combined = Array.from(new Set([...attendance, ...matchedIds]));
-    onUpdate(combined);
+    // CONSOLDIDATED UPDATE
+    onUpdate({
+      ...session,
+      attendance: Array.from(new Set(newAttendance)),
+      guestPlayers: newGuestPlayers,
+      updatedAt: Date.now()
+    });
+    
     setPasteMode(false);
     setPasteValue("");
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-            <Users size={16} />
-            Närvarande ({attendance.length})
-          </h3>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj spelare från truppen eller klistra in en lista</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <button
-            onClick={() => setPasteMode(true)}
-            className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap"
-          >
-            <ClipboardList size={14} />
-            Klistra in
-          </button>
-          <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
-          <button
-            onClick={() => onUpdate(squad.map(p => p.id))}
-            className="text-zinc-400 hover:text-indigo-600 font-bold text-[10px] uppercase whitespace-nowrap"
-          >
-            Alla närvarande
-          </button>
-          <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
-          <button
-            onClick={() => onUpdate([])}
-            className="text-zinc-400 hover:text-red-500 font-bold text-[10px] uppercase whitespace-nowrap"
-          >
-            Ingen närvarande
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {squad.map(player => {
-          const isPresent = attendance.includes(player.id);
-          return (
+    <div className="space-y-8">
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+              <Users size={16} />
+              Närvarande ({attendance.length})
+            </h3>
+            <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj spelare från truppen eller lägg till provspelare</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
-              key={player.id}
-              onClick={() => handleTogglePlayer(player.id)}
-              className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
-                isPresent 
-                  ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm' 
-                  : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-              }`}
+              onClick={() => setPasteMode(true)}
+              className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap"
             >
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                isPresent ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-              }`}>
-                {player.photoUrl ? (
-                  <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
-                ) : (
-                  <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-indigo-900 dark:text-indigo-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
-                  {player.name}
-                </p>
-                {player.number && (
-                  <p className="text-[10px] font-bold text-zinc-400">#{player.number}</p>
-                )}
-              </div>
+              <ClipboardList size={14} />
+              Klistra in lista
             </button>
-          );
-        })}
+            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
+            <button
+              onClick={() => onUpdate({ ...session, attendance: squad.map(p => p.id), updatedAt: Date.now() })}
+              className="text-zinc-400 hover:text-indigo-600 font-bold text-[10px] uppercase whitespace-nowrap"
+            >
+              Alla närvarande
+            </button>
+            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
+            <button
+              onClick={() => onUpdate({ ...session, attendance: [], updatedAt: Date.now() })}
+              className="text-zinc-400 hover:text-red-500 font-bold text-[10px] uppercase whitespace-nowrap"
+            >
+              Ingen närvarande
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {squad.map(player => {
+            const isPresent = attendance.includes(player.id);
+            return (
+              <button
+                key={player.id}
+                onClick={() => handleTogglePlayer(player.id)}
+                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
+                  isPresent 
+                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm' 
+                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                  isPresent ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                }`}>
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                  ) : (
+                    <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-indigo-900 dark:text-indigo-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                    {player.name}
+                  </p>
+                  {player.number && (
+                    <p className="text-[10px] font-bold text-zinc-400">#{player.number}</p>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {attendance.some(id => !squad.find(p => p.id === id)) && (
+      {/* Guest Players Section */}
+      <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+            <UserPlus size={14} />
+            Provspelare / Tillfälliga
+          </h4>
+        </div>
+
+        <form onSubmit={handleAddGuest} className="flex flex-col sm:flex-row gap-4 w-full">
+          <input
+            type="text"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+            placeholder="Namn på provspelare..."
+            className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm min-w-0"
+          />
+          <button
+            type="submit"
+            className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all active:scale-95 whitespace-nowrap min-h-[44px]"
+          >
+            Lägg till
+          </button>
+        </form>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {guestPlayers.map(guest => {
+            const isPresent = attendance.includes(guest.id);
+            return (
+              <div
+                key={guest.id}
+                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all group relative ${
+                  isPresent 
+                    ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm' 
+                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'
+                }`}
+              >
+                <button
+                  onClick={() => handleTogglePlayer(guest.id)}
+                  className="flex flex-1 items-center gap-3 min-w-0"
+                >
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                    isPresent ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                  }`}>
+                    <span className="text-[10px] font-black uppercase text-white">{guest.name.substring(0, 1)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-amber-900 dark:text-amber-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                      {guest.name}
+                    </p>
+                    <p className="text-[8px] font-bold text-amber-500 uppercase tracking-tighter">Provspelare</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => removeGuest(guest.id)}
+                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Manual names from past logic that are NOT in current guests or squad */}
+      {attendance.some(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)) && (
         <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
-          <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Manuellt tillagda / Ej i trupp</h4>
+          <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Manuellt inlagda (historiskt)</h4>
           <div className="flex flex-wrap gap-2">
-            {attendance.filter(id => !squad.find(p => p.id === id)).map(name => (
-              <div key={name} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700">
-                <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">{name}</span>
+            {attendance.filter(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)).map(idOrName => (
+              <div key={idOrName} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">
+                  {idOrName.startsWith('guest_') ? 'Okänd provspelare' : idOrName}
+                </span>
                 <button 
-                  onClick={() => onUpdate(attendance.filter(id => id !== name))}
+                  onClick={() => onUpdate({ ...session, attendance: attendance.filter(id => id !== idOrName), updatedAt: Date.now() })}
                   className="text-zinc-400 hover:text-red-500"
                 >
                   <X size={12} />
@@ -1492,7 +1647,7 @@ function ParticipantManager({
                 value={pasteValue}
                 onChange={(e) => setPasteValue(e.target.value)}
                 placeholder="Klistra in lista på namn här (separera med radbyte eller kommatecken)..."
-                className="w-full h-48 bg-zinc-50 dark:bg-zinc-800 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-6"
+                className="w-full h-48 bg-zinc-50 dark:bg-zinc-800 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-base font-medium outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-6"
               />
 
               <div className="flex gap-3">

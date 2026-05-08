@@ -98,7 +98,12 @@ function SessionItem({
             {session.moments.length} moment
             <div className="mx-2 h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
             <div className="flex items-center gap-2">
-              {!session.isCompleted && (
+              {session.isCompleted ? (
+                <div className="flex items-center gap-1 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 px-2 py-1 rounded-lg border border-green-100 dark:border-green-900/30 font-black">
+                  <Check size={12} strokeWidth={3} />
+                  Genomfört
+                </div>
+              ) : (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -187,7 +192,7 @@ export default function TrainingManager({
         {selectedExerciseForTeams && currentExerciseForTeams && (
           <TeamOverviewModal
             exercise={currentExerciseForTeams}
-            squad={squad}
+            squad={[...squad, ...(sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams))?.guestPlayers || [])]}
             onMovePlayer={onMovePlayer}
             onClose={() => setSelectedExerciseForTeams(null)}
             onStart={() => {

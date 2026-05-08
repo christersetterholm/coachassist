@@ -66,16 +66,21 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           response = await fetch(src, { 
             cache: 'default',
             mode: 'cors',
-            credentials: 'omit'
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer'
           });
         } catch (fetchErr) {
           // Silent proceed to proxy
         }
         
         if (!response || !response.ok) {
-          response = await fetch(`/api/proxy?url=${encodeURIComponent(src)}`, { 
-            cache: 'default'
-          });
+          try {
+            response = await fetch(`/api/proxy?url=${encodeURIComponent(src)}`, { 
+              cache: 'default'
+            });
+          } catch (proxyErr) {
+            // Proxy failed, will fall back in the outer catch
+          }
         }
         
         if (!response.ok) throw new Error(`Fetch failed`);
@@ -100,6 +105,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           reader.readAsDataURL(blob);
         }
       } catch (err) {
+        console.error(`[CachedImage] All load methods failed for ${src}:`, err);
         if (isMounted) {
           setDisplaySrc(src);
           setUseCors(false);
@@ -122,6 +128,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
   const isLocal = displaySrc?.startsWith('data:');
 
   if (!displaySrc || loadError) {
+    if (loadError) console.warn(`[CachedImage] Reached load error state for ${src}`);
     return <div className={`${className} bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400`}><User size={20} /></div>;
   }
 
@@ -131,8 +138,12 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
       className={className} 
       alt={alt} 
       crossOrigin={isLocal ? undefined : finalCrossOrigin} 
+      referrerPolicy="no-referrer"
       {...cleanProps} 
-      onError={() => setLoadError(true)}
+      onError={(e) => {
+        console.error(`[CachedImage] img.onError triggered for ${displaySrc.substring(0, 100)}...`);
+        setLoadError(true);
+      }}
     />
   );
-};
+}

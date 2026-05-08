@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Plus, LayoutList, Play } from 'lucide-react';
+import { Users, Plus, LayoutList, Play, X } from 'lucide-react';
 import { Exercise, SquadPlayer } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
 
 interface TeamOverviewModalProps {
   exercise: Exercise;
   squad: SquadPlayer[];
+  attendingIds?: string[];
   onMovePlayer: (exerciseId: string, playerId: string, targetTeamId: string) => void;
   onClose: () => void;
   onStart?: () => void;
@@ -15,42 +16,66 @@ interface TeamOverviewModalProps {
 export default function TeamOverviewModal({
   exercise,
   squad,
+  attendingIds,
   onMovePlayer,
   onClose,
   onStart
 }: TeamOverviewModalProps) {
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+  const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
 
-    const handleDragEnd = (playerId: string, x: number, y: number) => {
-    // Find all potential target containers
-    const teamElements = document.querySelectorAll('[data-team-id]');
-    let targetTeamId: string | null = null;
+  // Identify players who are attending but not in any team or joker pool
+  const assignedPlayerIds = new Set([
+    ...(exercise.teams?.flatMap(t => t.playerIds || []) || []),
+    ...(exercise.jokerPlayerIds || [])
+  ]);
 
-    // Manual hit detection using getBoundingClientRect
-    for (const el of Array.from(teamElements)) {
-      const rect = el.getBoundingClientRect();
-      if (
-        x >= rect.left && 
-        x <= rect.right && 
-        y >= rect.top && 
-        y <= rect.bottom
-      ) {
-        targetTeamId = el.getAttribute('data-team-id');
-        break;
+  // Unassigned players are those who are in the attending list but not in assignedPlayerIds
+  // If attendingIds is not provided (standalone exercise), we might not have "unassigned" concept the same way
+  // but if we do, it's players from squad not in teams.
+  const unassignedPlayers = attendingIds 
+    ? squad.filter(p => attendingIds.includes(p.id) && !assignedPlayerIds.has(p.id))
+    : [];
+
+  const isUnassignedDragging = draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId);
+
+  const handleDragUpdate = (x: number, y: number) => {
+    const targetId = detectTarget(x, y);
+    if (targetId !== activeTargetId) {
+      setActiveTargetId(targetId);
+    }
+  };
+
+  const detectTarget = (x: number, y: number) => {
+    // 1. Try elementFromPoint (Fastest)
+    const element = document.elementFromPoint(x, y);
+    const target = element?.closest('[data-team-id]');
+    if (target) return target.getAttribute('data-team-id');
+    
+    // 2. Manual fall-back (More robust for edge cases)
+    const allContainers = document.querySelectorAll('[data-team-id]');
+    for (const container of Array.from(allContainers)) {
+      const rect = container.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        return container.getAttribute('data-team-id');
       }
     }
+    return null;
+  };
 
-    if (targetTeamId) {
+  const handleDragEnd = (playerId: string) => {
+    if (activeTargetId) {
       // Find source team ID to see if we're dropping back into the same team
       const sourceTeam = exercise.teams.find(t => t.playerIds?.includes(playerId));
       const isJokerSource = exercise.jokerPlayerIds?.includes(playerId);
-      const sourceId = sourceTeam ? sourceTeam.id : (isJokerSource ? 'joker' : null);
+      const sourceId = sourceTeam ? sourceTeam.id : (isJokerSource ? 'joker' : 'none');
 
-      if (targetTeamId !== sourceId) {
-        onMovePlayer(exercise.id, playerId, targetTeamId);
+      if (activeTargetId !== sourceId) {
+        onMovePlayer(exercise.id, playerId, activeTargetId);
       }
     }
     setDraggedPlayerId(null);
+    setActiveTargetId(null);
   };
 
   return (
@@ -96,8 +121,8 @@ export default function TeamOverviewModal({
                 <div 
                   key={team.id} 
                   data-team-id={team.id}
-                  className={`bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border transition-all duration-200 flex flex-col h-full ${draggedPlayerId ? 'scale-[1.02] border-indigo-200 dark:border-indigo-800 bg-indigo-50/30' : 'border-zinc-100 dark:border-zinc-800'}`}
-                  style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                  className={`bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border transition-all duration-200 flex flex-col h-full ${activeTargetId === team.id ? 'scale-[1.02] border-indigo-500 bg-indigo-50/50 shadow-lg' : (draggedPlayerId ? 'border-zinc-200 dark:border-zinc-800 opacity-60' : 'border-zinc-100 dark:border-zinc-800')}`}
+                  style={{ zIndex: isThisTeamDragging ? 100 : (activeTargetId === team.id ? 80 : (draggedPlayerId ? 10 : 1)), position: 'relative' }}
                 >
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-4 h-4 rounded-full shadow-sm" style={{ backgroundColor: team.color }} />
@@ -123,15 +148,30 @@ export default function TeamOverviewModal({
                             pointerEvents: 'none'
                           }}
                           onDragStart={() => setDraggedPlayerId(pid)}
-                          onDragEnd={(e: any, info) => {
+                          onDrag={(e: any, info) => {
                             const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
-                            handleDragEnd(pid, point.clientX || point.x, point.clientY || point.y);
+                            handleDragUpdate(point.clientX || point.x, point.clientY || point.y);
+                          }}
+                          onDragEnd={() => {
+                            handleDragEnd(pid);
                           }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                           style={{ backgroundColor: team.color }}
                         >
-                          {player.name}
-                          {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                          <div className="flex items-center gap-1">
+                            <span>{player.name}</span>
+                            {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMovePlayer(exercise.id, pid, 'none');
+                              }}
+                              className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center"
+                              title="Ta bort från lag"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
                         </motion.div>
                       ) : null;
                     })}
@@ -151,8 +191,8 @@ export default function TeamOverviewModal({
                 <div 
                   key="joker-overview"
                   data-team-id="joker"
-                  className={`bg-indigo-50 dark:bg-indigo-950/30 p-6 rounded-3xl border transition-all duration-200 flex flex-col h-full shadow-sm ${draggedPlayerId ? 'scale-[1.02] border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/40'}`}
-                  style={{ zIndex: isJokerDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                  className={`bg-indigo-50 dark:bg-indigo-950/30 p-6 rounded-3xl border transition-all duration-200 flex flex-col h-full shadow-sm ${activeTargetId === 'joker' ? 'scale-[1.02] border-indigo-600 bg-indigo-100/50 shadow-lg' : (draggedPlayerId ? 'border-indigo-200 opacity-60' : 'border-indigo-100 dark:border-indigo-900/40')}`}
+                  style={{ zIndex: isJokerDragging ? 100 : (activeTargetId === 'joker' ? 80 : (draggedPlayerId ? 10 : 1)), position: 'relative' }}
                 >
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-4 h-4 rounded-full bg-indigo-600 shadow-sm" />
@@ -178,15 +218,30 @@ export default function TeamOverviewModal({
                             pointerEvents: 'none'
                           }}
                           onDragStart={() => setDraggedPlayerId(pid)}
-                          onDragEnd={(e: any, info) => {
+                          onDrag={(e: any, info) => {
                             const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
-                            handleDragEnd(pid, point.clientX || point.x, point.clientY || point.y);
+                            handleDragUpdate(point.clientX || point.x, point.clientY || point.y);
+                          }}
+                          onDragEnd={() => {
+                            handleDragEnd(pid);
                           }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                           style={{ backgroundColor: '#4f46e5' }}
                         >
-                          {player.name}
-                          {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                          <div className="flex items-center gap-1">
+                            <span>{player.name}</span>
+                            {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMovePlayer(exercise.id, pid, 'none');
+                              }}
+                              className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center"
+                              title="Ta bort från jokrar"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
                         </motion.div>
                       ) : null;
                     })}
@@ -194,6 +249,59 @@ export default function TeamOverviewModal({
                 </div>
               );
             })()}
+
+            {attendingIds && attendingIds.length > 0 && (
+              <div 
+                data-team-id="none"
+                className={`bg-zinc-50 dark:bg-zinc-950/30 p-6 rounded-3xl border border-dashed transition-all duration-200 flex flex-col h-full ${activeTargetId === 'none' ? 'scale-[1.02] border-indigo-500 bg-indigo-100/30 shadow-lg' : (draggedPlayerId ? 'border-zinc-300 dark:border-zinc-700 opacity-60' : 'border-zinc-200 dark:border-zinc-800')}`}
+                style={{ zIndex: isUnassignedDragging ? 100 : (activeTargetId === 'none' ? 80 : (draggedPlayerId ? 10 : 1)), position: 'relative' }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-4 h-4 rounded-full border-2 border-zinc-300 dark:border-zinc-700" />
+                  <span className="font-black text-sm text-zinc-500 dark:text-zinc-400 uppercase tracking-tight flex-1">Ej indelade / Avbytare</span>
+                  <div className="flex items-center gap-1.5 bg-zinc-200/50 dark:bg-zinc-800 px-2 py-1 rounded-lg">
+                    <Users size={12} className="text-zinc-500" />
+                    <span className="text-xs font-black text-zinc-600 dark:text-zinc-400">
+                      {unassignedPlayers.length}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 min-h-[60px]">
+                  {sortPlayersByPosition(unassignedPlayers.map(p => p.id), squad).map(pid => {
+                    const player = squad.find(p => p.id === pid);
+                    return player ? (
+                      <motion.div 
+                        key={pid} 
+                        drag
+                        dragSnapToOrigin
+                        whileDrag={{ 
+                          zIndex: 9999, 
+                          scale: 1.1,
+                          pointerEvents: 'none'
+                        }}
+                        onDragStart={() => setDraggedPlayerId(pid)}
+                        onDrag={(e: any, info) => {
+                          const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                          handleDragUpdate(point.clientX || point.x, point.clientY || point.y);
+                        }}
+                        onDragEnd={() => {
+                          handleDragEnd(pid);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300`} 
+                      >
+                        {player.name}
+                        {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                      </motion.div>
+                    ) : null;
+                  })}
+                  {unassignedPlayers.length === 0 && (
+                    <div className="w-full py-6 border-2 border-dashed border-zinc-200/50 dark:border-zinc-800/50 rounded-2xl flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center px-4">
+                      Dra spelare hit för att plocka bort dem från momentet
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

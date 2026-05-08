@@ -22,6 +22,7 @@ interface GameSetupProps {
   initialGame?: Exercise;
   onCancel?: () => void;
   squad: SquadPlayer[];
+  guestPlayers?: SquadPlayer[];
   sessionAttendance?: string[];
   activeSessionId?: string | null;
   sessions?: TrainingSession[];
@@ -37,7 +38,8 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad, sessionAttendance, activeSessionId, sessions, currentPeriodId }: GameSetupProps) {
+export default function GameSetup({ onStartGame, initialGame, onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, currentPeriodId }: GameSetupProps) {
+  const combinedSquad = [...(squad || []), ...(guestPlayers || [])];
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon] = useState(initialGame?.icon || 'Trophy');
   const [sortByScore, setSortByScore] = useState(initialGame?.sortByScore ?? false);
@@ -50,12 +52,18 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   const [showAttendanceInput, setShowAttendanceInput] = useState(false);
   const [attendanceText, setAttendanceText] = useState('');
   const [standaloneAttendance, setStandaloneAttendance] = useState<string[]>(
-    initialGame && !sessionAttendance ? initialGame.teams.flatMap(t => t.playerIds) : []
+    (initialGame && initialGame.teams && !sessionAttendance) ? initialGame.teams.flatMap(t => t.playerIds) : []
   );
   const [showStandaloneAttendance, setShowStandaloneAttendance] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
   const [showPointsSettings, setShowPointsSettings] = useState(false);
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+  const [excludeGoalkeepers, setExcludeGoalkeepers] = useState(false);
+
+  const isGoalkeeper = (p: SquadPlayer) => {
+    const pos = p.position?.toUpperCase() || '';
+    return pos.includes('MV') || pos.includes('MÅLVAKT');
+  };
   
   // Find linked session if any
   const linkedSession = sessions?.find(s => 
@@ -69,10 +77,12 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   const isAttendanceActive = Array.isArray(sessionAttendance) || standaloneAttendance.length > 0;
   
   const [teams, setTeams] = useState<Omit<Team, 'score'>[]>(
-    initialGame?.teams.map(({ score, ...t }) => t) || [
-      { id: crypto.randomUUID(), name: 'Lag 1', color: VEST_COLORS[0], playerIds: [] },
-      { id: crypto.randomUUID(), name: 'Lag 2', color: VEST_COLORS[1], playerIds: [] },
-    ]
+    (initialGame?.teams && initialGame.teams.length > 0) 
+      ? initialGame.teams.map(({ score, ...t }) => t) 
+      : [
+          { id: crypto.randomUUID(), name: 'Lag 1', color: VEST_COLORS[0], playerIds: [] },
+          { id: crypto.randomUUID(), name: 'Lag 2', color: VEST_COLORS[1], playerIds: [] },
+        ]
   );
 
   const adjustDefaultTime = (type: 'min' | 'sec', amount: number) => {
@@ -123,9 +133,17 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     
     if (isIndividual) {
       // Only include attending players if attendance is active
-      const playersToDistribute = isAttendanceActive 
-        ? squad.filter(p => currentAttendanceIds.includes(p.id))
-        : squad;
+      let playersToDistribute = isAttendanceActive 
+        ? combinedSquad.filter(p => {
+            const isGuest = p.id.startsWith('guest_');
+            return currentAttendanceIds.includes(p.id) || (isGuest && guestPlayers.some(gp => gp.id === p.id));
+          })
+        : combinedSquad;
+
+      // Exclude goalkeepers if toggle is active
+      if (excludeGoalkeepers) {
+        playersToDistribute = playersToDistribute.filter(p => !isGoalkeeper(p));
+      }
 
       // If we are in a session but NO ONE is attending, we should probably warn or just show 0 teams if isIndividual
       if (isAttendanceActive && playersToDistribute.length === 0) {
@@ -201,7 +219,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     // 2. Match with squad
     const attendingPlayers: SquadPlayer[] = [];
     
-    squad.forEach(player => {
+    combinedSquad.forEach(player => {
       const playerNameLower = player.name.toLowerCase();
       // Check for exact match or if the input name is part of the player name
       const isAttending = inputNames.some(inputName => {
@@ -244,14 +262,14 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
     const attendingPlayers: SquadPlayer[] = [];
 
     list.forEach(idOrName => {
-      const player = squad.find(p => p.id === idOrName || p.name.toLowerCase() === idOrName.toLowerCase());
+      const player = combinedSquad.find(p => p.id === idOrName || p.name.toLowerCase() === idOrName.toLowerCase());
       if (player) {
         attendingPlayers.push(player);
       }
     });
 
     if (attendingPlayers.length === 0) {
-      alert("Hittade inga spelare från närvarolistan i truppen.");
+      alert("Hittade inga spelare från närvarolistan i truppen eller bland provspelare.");
       return;
     }
 
@@ -267,9 +285,15 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
   };
 
   const _distributePlayers = (attendingPlayers: SquadPlayer[]) => {
+    // Filter out goalkeepers if toggle is active
+    let playersToDistribute = [...attendingPlayers];
+    if (excludeGoalkeepers) {
+      playersToDistribute = playersToDistribute.filter(p => !isGoalkeeper(p));
+    }
+
     // 3. Group players by position to distribute them evenly
     const playersByPosition: Record<string, string[]> = {};
-    attendingPlayers.forEach(p => {
+    playersToDistribute.forEach(p => {
       const pos = p.position || 'Odefinierad';
       if (!playersByPosition[pos]) playersByPosition[pos] = [];
       playersByPosition[pos].push(p.id);
@@ -618,7 +642,39 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex flex-col shrink-0">
                 <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag / Deltagar-läge</label>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Hur många lag ska delas in?</span>
+                <div className="flex items-center gap-3 mt-1">
+                   <button
+                    type="button"
+                    onClick={() => {
+                      const newValue = !excludeGoalkeepers;
+                      setExcludeGoalkeepers(newValue);
+                      if (newValue) {
+                        // If turning ON, remove goalkeepers from all teams and jokers
+                        setTeams(prev => prev.map(t => ({
+                          ...t,
+                          playerIds: t.playerIds.filter(pid => {
+                            const p = combinedSquad.find(player => player.id === pid);
+                            return p ? !isGoalkeeper(p) : true;
+                          })
+                        })));
+                        setJokerPlayerIds(prev => prev.filter(pid => {
+                          const p = combinedSquad.find(player => player.id === pid);
+                          return p ? !isGoalkeeper(p) : true;
+                        }));
+                      }
+                    }}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${
+                      excludeGoalkeepers 
+                        ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/10 dark:border-indigo-800' 
+                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
+                    }`}
+                  >
+                    <div className={`w-8 h-4 rounded-full transition-colors relative ${excludeGoalkeepers ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${excludeGoalkeepers ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </div>
+                    <span className={`text-[10px] font-black uppercase tracking-tight ${excludeGoalkeepers ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 dark:text-zinc-400'}`}>Hoppa över målvakterna</span>
+                  </button>
+                </div>
               </div>
               <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
                 {[1, 2, 3, 4].map(num => (
@@ -651,8 +707,8 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                 </div>
                 <button
                   type="button"
-                  onClick={() => setTeamCount(isAttendanceActive ? currentAttendanceIds.length : squad.length, true)}
-                  disabled={squad.length === 0}
+                  onClick={() => setTeamCount(isAttendanceActive ? currentAttendanceIds.length : combinedSquad.length, true)}
+                  disabled={combinedSquad.length === 0}
                   className="px-4 h-9 rounded-xl text-[10px] font-black transition-all border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 uppercase disabled:opacity-50 tracking-tight"
                 >
                   {isAttendanceActive ? 'En per närvarande' : 'En per spelare'}
@@ -698,8 +754,9 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                       >
                         <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
                           <div className="flex flex-wrap gap-2">
-                            {sortPlayersByPosition(squad.map(p => p.id), squad).map(pid => {
-                              const player = squad.find(p => p.id === pid)!;
+                            {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad).map(pid => {
+                              const player = combinedSquad.find(p => p.id === pid);
+                              if (!player) return null;
                               return (
                                 <button
                                   key={player.id}
@@ -836,8 +893,8 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
-                            const player = squad.find(p => p.id === pid);
+                          {sortPlayersByPosition(team.playerIds || [], combinedSquad).map(pid => {
+                            const player = combinedSquad.find(p => p.id === pid);
                             return player ? (
                               <motion.div 
                                 key={pid} 
@@ -888,8 +945,8 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(jokerPlayerIds || [], squad).map(pid => {
-                            const player = squad.find(p => p.id === pid);
+                          {sortPlayersByPosition(jokerPlayerIds || [], combinedSquad).map(pid => {
+                            const player = combinedSquad.find(p => p.id === pid);
                             return player ? (
                               <motion.div 
                                 key={pid} 
@@ -955,12 +1012,17 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                           <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
                         )}
                       </div>
-                      {squad.length > 0 ? (
+                      {combinedSquad.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
-                          {sortPlayersByPosition(squad.map(p => p.id), squad)
-                            .filter(pid => isAttendanceActive ? currentAttendanceIds.includes(pid) : true)
+                          {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad)
+                            .filter(pid => {
+                              if (!isAttendanceActive) return true;
+                              const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
+                              return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
+                            })
                             .map(pid => {
-                              const player = squad.find(p => p.id === pid)!;
+                              const player = combinedSquad.find(p => p.id === pid);
+                              if (!player) return null;
                               const isJoker = jokerPlayerIds.includes(player.id);
                             const isInAnyTeam = teams.some(t => t.playerIds.includes(player.id));
                             
@@ -972,12 +1034,9 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
                                   isJoker 
                                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' 
-                                    : isInAnyTeam
-                                      ? 'bg-zinc-100 border-zinc-100 text-zinc-400 opacity-50 cursor-not-allowed'
-                                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
+                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
                                 }`}
                                 style={isJoker ? { backgroundColor: '#6366f1', borderColor: '#6366f1' } : {}}
-                                disabled={isInAnyTeam}
                               >
                                 {player.name}
                                 {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
@@ -1054,20 +1113,26 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Välj spelare från truppen</label>
+                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                          {guestPlayers.length > 0 ? 'Välj spelare (inkl. provspelare)' : 'Välj spelare från truppen'}
+                        </label>
                         {isAttendanceActive && (
                           <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
                         )}
                       </div>
-                      {squad.length > 0 ? (
+                      {combinedSquad.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
-                          {sortPlayersByPosition(squad.map(p => p.id), squad)
-                            .filter(pid => isAttendanceActive ? currentAttendanceIds.includes(pid) : true)
+                          {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad)
+                            .filter(pid => {
+                              if (!isAttendanceActive) return true;
+                              const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
+                              return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
+                            })
                             .map(pid => {
-                              const player = squad.find(p => p.id === pid)!;
+                              const player = combinedSquad.find(p => p.id === pid);
+                              if (!player) return null;
                               const isSelected = team.playerIds.includes(player.id);
                               const isJoker = jokerPlayerIds.includes(player.id);
-                              const isInOtherTeam = teams.some(t => t.id !== team.id && t.playerIds.includes(player.id));
                               
                               return (
                                 <button
@@ -1077,12 +1142,12 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad, s
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
                                   isSelected 
                                     ? 'text-white shadow-md' 
-                                    : (isInOtherTeam || isJoker)
+                                    : isJoker
                                       ? 'bg-zinc-100 border-zinc-100 text-zinc-400 opacity-50 cursor-not-allowed'
                                       : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
                                 }`}
                                 style={isSelected ? { backgroundColor: team.color, borderColor: team.color } : {}}
-                                disabled={isInOtherTeam || isJoker}
+                                disabled={isJoker}
                               >
                                 {player.name}
                                 {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}

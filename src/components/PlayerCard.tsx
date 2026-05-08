@@ -1,13 +1,14 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Minus, Plus, Users } from 'lucide-react';
-import { motion } from 'motion/react';
-import { Team, SquadPlayer } from '../types';
+import { Minus, Plus, Users, Palette, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Team, SquadPlayer, VEST_COLORS, PRESET_COLORS } from '../types';
 
 interface PlayerCardProps {
   team: Team;
   squad: SquadPlayer[];
   rank: number;
   onUpdateScore: (id: string, delta: number) => void;
+  onUpdateColor?: (id: string, color: string) => void;
   onRankClick?: () => void;
   disabled?: boolean;
   exerciseId?: string;
@@ -23,6 +24,7 @@ export default function PlayerCard({
   squad, 
   rank, 
   onUpdateScore, 
+  onUpdateColor,
   onRankClick, 
   disabled, 
   exerciseId, 
@@ -35,6 +37,7 @@ export default function PlayerCard({
   const [fontSize, setFontSize] = useState<number>(120);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isOver, setIsOver] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
   const teamPlayers = squad.filter(p => team.playerIds.includes(p.id));
   const isThisPlayerDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
@@ -95,7 +98,7 @@ export default function PlayerCard({
         boxShadow: isOver ? `0 0 20px ${team.color}40` : '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
         backgroundColor: isAnyPlayerDragging ? `${team.color}EE` : team.color,
         borderColor: isOver ? 'rgba(255,255,255,0.5)' : (isAnyPlayerDragging ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.05)'),
-        zIndex: isThisPlayerDragging ? 100 : (isAnyPlayerDragging ? 10 : 1)
+        zIndex: showColorPicker ? 110 : (isThisPlayerDragging ? 100 : (isAnyPlayerDragging ? 10 : 1))
       }}
       data-team-id={team.id}
       onMouseEnter={() => isAnyPlayerDragging && setIsOver(true)}
@@ -145,7 +148,7 @@ export default function PlayerCard({
         </div>
 
         {/* Score Display */}
-        <div ref={containerRef} className="flex-1 flex items-center justify-center p-0.5 overflow-hidden relative">
+        <div ref={containerRef} className="flex-1 flex items-center justify-center p-0.5 relative">
           <button 
             onClick={(e) => {
               e.stopPropagation();
@@ -155,6 +158,74 @@ export default function PlayerCard({
           >
             <span className="text-sm sm:text-lg font-black text-white">{rank}</span>
           </button>
+
+          {!disabled && onUpdateColor && (
+            <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-[60]">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowColorPicker(!showColorPicker);
+                }}
+                className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full border border-white/30 shadow-inner transition-all cursor-pointer ${showColorPicker ? 'bg-white text-indigo-600 scale-110' : 'bg-white/20 text-white hover:bg-white/30'}`}
+              >
+                <Palette size={16} className="sm:size-5" />
+              </button>
+
+              <AnimatePresence>
+                {showColorPicker && (
+                   <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                    className="absolute bottom-full left-0 mb-2 p-3 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl z-[100] w-[200px] sm:w-[240px]"
+                   >
+                     <div className="flex items-center justify-between mb-3 px-1">
+                       <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Välj färg</span>
+                       <button onClick={() => setShowColorPicker(false)} className="text-zinc-400 hover:text-zinc-600">
+                         <X size={14} />
+                       </button>
+                     </div>
+                     
+                     <div className="space-y-4">
+                       {/* Common Vest Colors */}
+                       <div className="grid grid-cols-5 gap-2">
+                         {VEST_COLORS.map(c => (
+                           <button
+                             key={c}
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               onUpdateColor(team.id, c);
+                               setShowColorPicker(false);
+                             }}
+                             className={`w-full aspect-square rounded-full border-2 transition-transform hover:scale-110 active:scale-95 ${team.color.toLowerCase() === c.toLowerCase() ? 'border-zinc-900 dark:border-white shadow-lg' : 'border-transparent'}`}
+                             style={{ backgroundColor: c }}
+                           />
+                         ))}
+                       </div>
+
+                       {/* More Colors */}
+                       <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                         <div className="grid grid-cols-6 gap-1.5 px-0.5">
+                           {PRESET_COLORS.filter(c => !VEST_COLORS.includes(c)).slice(0, 12).map(c => (
+                             <button
+                               key={c}
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 onUpdateColor(team.id, c);
+                                 setShowColorPicker(false);
+                               }}
+                               className={`w-full aspect-square rounded-full border transition-transform hover:scale-110 active:scale-95 ${team.color.toLowerCase() === c.toLowerCase() ? 'border-zinc-900 dark:border-white' : 'border-transparent'}`}
+                               style={{ backgroundColor: c }}
+                             />
+                           ))}
+                         </div>
+                       </div>
+                     </div>
+                   </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
           
           <span 
             className="font-black text-white tabular-nums drop-shadow-md leading-none select-none transition-all duration-300"

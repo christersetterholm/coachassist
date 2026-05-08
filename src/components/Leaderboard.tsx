@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Calendar, Share2, Crown, Star, Medal, ChevronDown, ChevronUp, Eye, EyeOff, Plus, Lock, Trash2, Loader2, ExternalLink, Edit2, Check } from 'lucide-react';
+import { Trophy, Calendar, Share2, Crown, Star, Medal, ChevronDown, ChevronUp, Eye, EyeOff, Plus, Lock, Trash2, Loader2, ExternalLink, Edit2, Check, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
+import { CachedImage } from './CachedImage';
 
 interface LeaderboardProps {
   squad: SquadPlayer[];
@@ -96,6 +97,7 @@ export default function Leaderboard({
             standings: stats.map((p: any) => ({
               playerId: p.id,
               playerName: p.name,
+              photoUrl: p.photoUrl || null,
               points: p.totalPoints,
               history: p.history || []
             })),
@@ -122,12 +124,16 @@ export default function Leaderboard({
   // but recalculating is fine if the exercises are still there.
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId);
   const displayStats = (selectedPeriod && selectedPeriod.endDate) 
-    ? selectedPeriod.standings.map(s => ({
-        id: s.playerId,
-        name: s.playerName,
-        totalPoints: s.points,
-        history: [] // History might not be available for archived periods if exercises are deleted, but here they are kept
-      })).sort((a, b) => b.totalPoints - a.totalPoints)
+    ? selectedPeriod.standings.map(s => {
+        const squadPlayer = squad.find(p => p.id === s.playerId);
+        return {
+          id: s.playerId,
+          name: s.playerName,
+          photoUrl: s.photoUrl || squadPlayer?.photoUrl || null,
+          totalPoints: s.points,
+          history: [] // History might not be available for archived periods if exercises are deleted, but here they are kept
+        };
+      }).sort((a, b) => b.totalPoints - a.totalPoints)
     : playerStats;
 
   const handleCreateConfirm = () => {
@@ -150,7 +156,8 @@ export default function Leaderboard({
       .map(p => ({
         playerId: p.id,
         playerName: p.name,
-        points: p.totalPoints
+        points: p.totalPoints,
+        photoUrl: p.photoUrl || null
       }));
     
     onClosePeriod('', standings); // Name is already set for the period
@@ -197,6 +204,7 @@ export default function Leaderboard({
     ? sharedData.standings.map((s: any) => ({
         id: s.playerId,
         name: s.playerName,
+        photoUrl: s.photoUrl || s.imageUrl,
         totalPoints: s.points,
         history: s.history || []
       }))
@@ -255,6 +263,7 @@ export default function Leaderboard({
         standings: displayStats.map((p: any) => ({
           playerId: p.id,
           playerName: p.name,
+          photoUrl: p.photoUrl || null,
           points: p.totalPoints,
           history: p.history || []
         })),
@@ -465,17 +474,34 @@ export default function Leaderboard({
                 onClick={() => hasHistory && togglePlayer(player.id)}
               >
                 <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl ${
-                    index === 0 ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                    index === 1 ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400' :
-                    index === 2 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' :
-                    'bg-zinc-50 text-zinc-400 dark:bg-zinc-950 dark:text-zinc-600'
-                  }`}>
-                    {index === 0 ? <Crown size={24} /> : index + 1}
+                  <div className="relative">
+                    <div className="w-14 h-14 rounded-2xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-2 border-white dark:border-zinc-800 shadow-md flex items-center justify-center text-zinc-400">
+                      {player.photoUrl ? (
+                        <CachedImage 
+                          src={player.photoUrl} 
+                          alt={player.name}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <User size={24} className="text-zinc-300 dark:text-zinc-600" />
+                      )}
+                    </div>
+                    
+                    {/* Rank Badge */}
+                    <div className={`absolute -top-1.5 -left-1.5 w-7 h-7 rounded-full flex items-center justify-center font-black text-xs border-2 border-white dark:border-zinc-950 shadow-md z-10 ${
+                      index === 0 ? 'bg-yellow-400 text-white shadow-yellow-200' :
+                      index === 1 ? 'bg-zinc-400 text-white' :
+                      index === 2 ? 'bg-orange-400 text-white' :
+                      'bg-zinc-800 text-white'
+                    }`}>
+                      {index === 0 ? <Crown size={14} /> : index + 1}
+                    </div>
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-black text-lg text-zinc-900 dark:text-white">{player.name}</span>
+                      <span className="font-black text-lg text-zinc-900 dark:text-white line-clamp-1">{player.name}</span>
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
                       {getSubtitle(player)}
@@ -561,7 +587,7 @@ export default function Leaderboard({
         })}
       </div>
 
-      {displayStats.length === 0 && (
+      {(displayStats.length === 0 && !sharedId) && (
         <div className="text-center py-20">
           <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-3xl flex items-center justify-center text-zinc-400 mx-auto mb-6">
             <Trophy size={40} />

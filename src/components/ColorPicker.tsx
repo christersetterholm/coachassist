@@ -1,19 +1,11 @@
 import React, { useState } from 'react';
 import { Pipette, ChevronDown, ChevronUp } from 'lucide-react';
-import { PRESET_COLORS } from '../types';
+import { PRESET_COLORS, VEST_COLORS } from '../types';
 
 interface ColorPickerProps {
   selectedColor: string;
   onChange: (color: string) => void;
 }
-
-const VEST_COLORS = [
-  '#1E3A8A', // Navy (Tröjfärg)
-  '#84CC16', // Lime
-  '#0EA5E9', // Sky
-  '#F97316', // Orange
-  '#71717A', // Zinc
-];
 
 export default function ColorPicker({ selectedColor, onChange }: ColorPickerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
