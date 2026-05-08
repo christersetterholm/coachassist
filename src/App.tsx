@@ -89,7 +89,19 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
   
-  const [view, setView] = useState<View>('training');
+  const [view, setView] = useState<View>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get('view');
+    const shareId = params.get('share');
+    
+    // If sharing, priority is leaderboard (already handled by useEffect but setting here for initial sync too)
+    if (shareId) return 'leaderboard';
+    
+    if (v === 'squad' || v === 'training' || v === 'leaderboard' || v === 'profile' || v === 'lineup' || v === 'teampage') {
+      return v as View;
+    }
+    return 'training';
+  });
   const [trainingTab, setTrainingTab] = useState<'planned' | 'completed' | 'exercises'>('planned');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
@@ -1457,13 +1469,19 @@ export default function App() {
                 <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-8 font-medium leading-relaxed">
                   Här kan du planera dina träningar och skapa tävlingsmoment. Starta appen som ledare genom att gå till den här sidan.
                 </p>
-                <a
-                  href={window.location.origin}
+                <button
+                  onClick={() => {
+                    setSharedLeaderboardId(null);
+                    const url = new URL(window.location.origin);
+                    url.searchParams.set('view', 'squad');
+                    window.history.pushState({}, '', url);
+                    setView('squad');
+                  }}
                   className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none flex items-center gap-2"
                 >
                   <Rocket size={20} />
                   <span>Kom igång här</span>
-                </a>
+                </button>
               </motion.div>
             ) : (
               <>
@@ -1584,13 +1602,19 @@ export default function App() {
                 <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-8 font-medium leading-relaxed">
                   Här kan du lägga in din egen trupp om du själv vill använda appen. Gå till den här sidan för att komma igång.
                 </p>
-                <a
-                  href={window.location.origin}
+                <button
+                  onClick={() => {
+                    setSharedLeaderboardId(null);
+                    const url = new URL(window.location.origin);
+                    url.searchParams.set('view', 'squad');
+                    window.history.pushState({}, '', url);
+                    setView('squad');
+                  }}
                   className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none flex items-center gap-2"
                 >
                   <Rocket size={20} />
                   <span>Lägg in din egen trupp</span>
-                </a>
+                </button>
               </motion.div>
             ) : (
               <SquadManager key="squad" squad={squad} onUpdateSquad={handleUpdateSquad} />

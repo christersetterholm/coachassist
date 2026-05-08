@@ -147,6 +147,9 @@ export default function LineupBuilder({
   const [showNameBackground, setShowNameBackground] = useState(lineup?.showNameBackground ?? true);
   const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal'>(lineup?.nameBackgroundType || 'classic');
   const [showPhoto, setShowPhoto] = useState(lineup?.showPhoto ?? true);
+  const [showImport, setShowImport] = useState(false);
+  const [pastedText, setPastedText] = useState('');
+  const [importResult, setImportResult] = useState<{ found: string[], missing: string[] } | null>(null);
   const [showNumber, setShowNumber] = useState(lineup?.showNumber ?? true);
   const [teamLogoUrl, setTeamLogoUrl] = useState(lineup?.teamLogoUrl || '');
   const [pitchType, setPitchType] = useState<'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass'>(lineup?.pitchType || 'classic');
@@ -1443,6 +1446,72 @@ export default function LineupBuilder({
       nameTagStyle: 'light'
     };
     onSaveLineup(newLineup);
+  };
+
+  const handleImportPlayers = () => {
+    if (!pastedText.trim()) return;
+
+    const excludedWords = ['deltar ej', 'deltar', 'ej svarat', 'anmäld', 'reserv'];
+    const lines = pastedText.split(/[\n,;]/);
+    const namesToFind = lines
+      .map(line => {
+        let cleanName = line.trim();
+        excludedWords.forEach(word => {
+          const regex = new RegExp(word, 'gi');
+          cleanName = cleanName.replace(regex, '');
+        });
+        return cleanName.trim();
+      })
+      .filter(name => name.length > 2); // Ignore very short strings
+
+    const foundNames: string[] = [];
+    const missingNames: string[] = [];
+    const newPlayers: LineupPlayer[] = [...players];
+    let changed = false;
+
+    namesToFind.forEach(name => {
+      // Try exact match first
+      let match = squad.find(s => s.name.toLowerCase() === name.toLowerCase());
+      
+      // Try partial match if no exact match
+      if (!match) {
+        match = squad.find(s => 
+          s.name.toLowerCase().includes(name.toLowerCase()) || 
+          name.toLowerCase().includes(s.name.toLowerCase())
+        );
+      }
+
+      if (match) {
+        foundNames.push(match.name);
+        const alreadyInLineup = newPlayers.find(p => p.playerId === match!.id);
+        if (!alreadyInLineup) {
+          newPlayers.push({
+            id: crypto.randomUUID(),
+            playerId: match.id,
+            x: 50,
+            y: 50,
+            isSubstitute: false
+          });
+          changed = true;
+        } else if (alreadyInLineup.isSubstitute) {
+          // If already on bench, move to pitch
+          alreadyInLineup.isSubstitute = false;
+          alreadyInLineup.y = 50;
+          changed = true;
+        }
+      } else {
+        missingNames.push(name);
+      }
+    });
+
+    if (changed) {
+      pushHistory();
+      setPlayers(newPlayers);
+      setHasUnsavedChanges(true);
+    }
+
+    setImportResult({ found: foundNames, missing: missingNames });
+    setPastedText('');
   };
 
   const togglePlayerInLineup = (playerId: string, isSubstitute: boolean) => {
@@ -3616,7 +3685,11 @@ export default function LineupBuilder({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setPickerMode(null)}
+            onClick={() => {
+              setPickerMode(null);
+              setShowImport(false);
+              setImportResult(null);
+            }}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -3628,100 +3701,170 @@ export default function LineupBuilder({
               <div className="flex items-center justify-between mb-6">
                 <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-2xl">
                   <button 
-                    onClick={() => setPickerMode('starter')}
+                    onClick={() => setShowImport(false)}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                      pickerMode === 'starter' 
+                      !showImport 
                       ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
                       : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                     }`}
                   >
-                    På planen ({starters.length})
+                    Välj spelare
                   </button>
                   <button 
-                    onClick={() => setPickerMode('sub')}
+                    onClick={() => setShowImport(true)}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                      pickerMode === 'sub' 
+                      showImport 
                       ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
                       : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                     }`}
                   >
-                    På bänken ({subs.length})
+                    Klistra in namn
                   </button>
                 </div>
-                <button onClick={() => setPickerMode(null)} className="text-zinc-400 hover:text-zinc-600 p-2">
+                <button onClick={() => {
+                  setPickerMode(null);
+                  setShowImport(false);
+                  setImportResult(null);
+                }} className="text-zinc-400 hover:text-zinc-600 p-2">
                   <X size={24} />
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                {Array.from(new Map(squad.map(sp => [sp.id, sp])).values()).map(sp => {
-                  const itemInLineup = players.find(p => p.playerId === sp.id);
-                  const isCurrentMode = itemInLineup && (
-                    (pickerMode === 'starter' && !itemInLineup.isSubstitute) ||
-                    (pickerMode === 'sub' && itemInLineup.isSubstitute)
-                  );
-                  const isOtherMode = itemInLineup && !isCurrentMode;
-
-                  return (
-                    <button
-                      key={sp.id}
-                      onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
-                        isCurrentMode 
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
-                          : isOtherMode
-                            ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors'
-                            : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:border-indigo-300 dark:hover:border-indigo-900/30 transition-colors'
+              {!showImport ? (
+                <>
+                  <div className="flex bg-zinc-50 dark:bg-zinc-950 p-1 rounded-xl mb-4 border border-zinc-100 dark:border-zinc-800">
+                    <button 
+                      onClick={() => setPickerMode('starter')}
+                      className={`flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                        pickerMode === 'starter' 
+                        ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
+                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                       }`}
                     >
-                      <div className="relative">
-                        <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'opacity-70' : ''}`}>
-                          {sp.photoUrl ? (
-                            <CachedImage 
-                              src={sp.photoUrl} 
-                              alt={sp.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <User size={20} />
-                          )}
-                        </div>
-                        {sp.number && (
-                          <div className={`absolute w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black border-2 shadow-sm transition-all ${
-                            isCurrentMode 
-                              ? 'bg-white text-indigo-600 border-indigo-600 -top-1.5 -left-1.5' 
-                              : 'bg-indigo-600 text-white border-white dark:border-zinc-900 -top-1.5 -right-1.5'
-                          }`}>
-                            {sp.number}
-                          </div>
-                        )}
-                        {isCurrentMode && !sp.number && (
-                          <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in">
-                            <Check size={12} />
-                          </div>
-                        )}
-                        {isCurrentMode && sp.number && (
-                          <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in shadow-sm">
-                            <Check size={10} />
-                          </div>
-                        )}
-                        {isOtherMode && (
-                          <div className="absolute -top-2 -right-2 bg-zinc-500 text-white rounded-full p-0.5 px-1.5 shadow-sm">
-                            <span className="text-[7px] font-black uppercase tracking-tighter">{itemInLineup.isSubstitute ? 'BÄNK' : 'PLAN'}</span>
-                          </div>
-                        )}
-                      </div>
-                      <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
-                        isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
-                      }`}>
-                        {sp.name}
-                      </span>
+                      På planen ({starters.length})
                     </button>
-                  );
-                })}
-              </div>
+                    <button 
+                      onClick={() => setPickerMode('sub')}
+                      className={`flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                        pickerMode === 'sub' 
+                        ? 'bg-white dark:bg-zinc-700 text-indigo-600 shadow-sm' 
+                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                      }`}
+                    >
+                      På bänken ({subs.length})
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {Array.from(new Map(squad.map(sp => [sp.id, sp])).values()).map(sp => {
+                      const itemInLineup = players.find(p => p.playerId === sp.id);
+                      const isCurrentMode = itemInLineup && (
+                        (pickerMode === 'starter' && !itemInLineup.isSubstitute) ||
+                        (pickerMode === 'sub' && itemInLineup.isSubstitute)
+                      );
+                      const isOtherMode = itemInLineup && !isCurrentMode;
+
+                      return (
+                        <button
+                          key={sp.id}
+                          onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
+                            isCurrentMode 
+                              ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
+                              : isOtherMode
+                                ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors'
+                                : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:border-indigo-300 dark:hover:border-indigo-900/30 transition-colors'
+                          }`}
+                        >
+                          <div className="relative">
+                            <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'opacity-70' : ''}`}>
+                              {sp.photoUrl ? (
+                                <CachedImage 
+                                  src={sp.photoUrl} 
+                                  alt={sp.name} 
+                                  className="w-full h-full object-cover" 
+                                  loading="lazy"
+                                  decoding="async"
+                                />
+                              ) : (
+                                <User size={20} />
+                              )}
+                            </div>
+                            {sp.number && (
+                              <div className={`absolute w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black border-2 shadow-sm transition-all ${
+                                isCurrentMode 
+                                  ? 'bg-white text-indigo-600 border-indigo-600 -top-1.5 -left-1.5' 
+                                  : 'bg-indigo-600 text-white border-white dark:border-zinc-900 -top-1.5 -right-1.5'
+                              }`}>
+                                {sp.number}
+                              </div>
+                            )}
+                            {isCurrentMode && !sp.number && (
+                              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in">
+                                <Check size={12} />
+                              </div>
+                            )}
+                            {isCurrentMode && sp.number && (
+                              <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in shadow-sm">
+                                <Check size={10} />
+                              </div>
+                            )}
+                            {isOtherMode && (
+                              <div className="absolute -top-2 -right-2 bg-zinc-500 text-white rounded-full p-0.5 px-1.5 shadow-sm">
+                                <span className="text-[7px] font-black uppercase tracking-tighter">{itemInLineup.isSubstitute ? 'BÄNK' : 'PLAN'}</span>
+                              </div>
+                            )}
+                          </div>
+                          <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
+                            isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
+                          }`}>
+                            {sp.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
+                    <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
+                      Klistra in en lista med namn (t.ex. från kallelse). Vi matchar dem mot truppen och lägger till dem på planen. Ord som "Deltar" filtreras bort automatiskt.
+                    </p>
+                  </div>
+                  
+                  <textarea
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="Klistra in namn här..."
+                    className="w-full h-40 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                  />
+
+                  {importResult && (
+                    <div className="space-y-2">
+                      {importResult.found.length > 0 && (
+                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+                          Hittade: {importResult.found.join(', ')}
+                        </p>
+                      )}
+                      {importResult.missing.length > 0 && (
+                        <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest">
+                          Kunde inte matcha: {importResult.missing.join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportPlayers}
+                    disabled={!pastedText.trim()}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Check size={18} />
+                    <span>Aktivera spelare</span>
+                  </button>
+                </div>
+              )}
 
               <div className="mt-6">
                 <button
