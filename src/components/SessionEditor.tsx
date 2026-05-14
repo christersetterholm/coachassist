@@ -747,6 +747,21 @@ export default function SessionEditor({
     });
   };
 
+  const handleQuickAddGuest = (name: string) => {
+    const currentSession = sessionRef.current;
+    const newGuest: SquadPlayer = {
+      id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      name: name.trim(),
+    };
+
+    onUpdate({
+      ...currentSession,
+      guestPlayers: [...(currentSession.guestPlayers || []), newGuest],
+      attendance: [...(currentSession.attendance || []), newGuest.id],
+      updatedAt: Date.now()
+    });
+  };
+
   const handleReorder = (newMoments: SessionMoment[]) => {
     const currentSession = sessionRef.current;
     onUpdate({
@@ -766,6 +781,7 @@ export default function SessionEditor({
             squad={[...(squad || []), ...(session.guestPlayers || [])]}
             onMovePlayer={onMovePlayer || (() => {})}
             onClose={() => setSelectedExerciseForTeams(null)}
+            onAddGuest={handleQuickAddGuest}
             onStart={() => {
               const id = selectedExerciseForTeams;
               setSelectedExerciseForTeams(null);
@@ -1365,6 +1381,7 @@ function ParticipantManager({
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [sortAttendingFirst, setSortAttendingFirst] = useState(false);
   const attendance = session.attendance || [];
   const guestPlayers = session.guestPlayers || [];
 
@@ -1457,6 +1474,22 @@ function ParticipantManager({
     setPasteValue("");
   };
 
+  const sortedSquad = useMemo(() => {
+    // Deduplicate squad if needed (though it should be unique by ID)
+    const squadList = Array.from(new Map(squad.map(p => [p.id, p])).values());
+    
+    if (!sortAttendingFirst) return squadList;
+
+    // Stable sort: present players first, then maintaining original order (role)
+    return [...squadList].sort((a, b) => {
+      const aPresent = attendance.includes(a.id);
+      const bPresent = attendance.includes(b.id);
+      
+      if (aPresent === bPresent) return 0;
+      return aPresent ? -1 : 1;
+    });
+  }, [squad, attendance, sortAttendingFirst]);
+
   return (
     <div className="space-y-8">
       <div className="space-y-6">
@@ -1468,7 +1501,20 @@ function ParticipantManager({
             </h3>
             <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj spelare från truppen eller lägg till provspelare</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+            <button
+              onClick={() => setSortAttendingFirst(!sortAttendingFirst)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-[10px] uppercase transition-all ${
+                sortAttendingFirst 
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm' 
+                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-zinc-100 dark:border-zinc-700 hover:border-zinc-200'
+              }`}
+              title="Sortera närvarande först"
+            >
+              <Users size={12} className={sortAttendingFirst ? 'text-white' : 'text-zinc-400'} />
+              <span>Närvarande först</span>
+            </button>
+            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800 hidden sm:block" />
             <button
               onClick={() => setPasteMode(true)}
               className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap"
@@ -1494,7 +1540,7 @@ function ParticipantManager({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {Array.from(new Map(squad.map(p => [p.id, p])).values()).map(player => {
+          {sortedSquad.map(player => {
             const isPresent = attendance.includes(player.id);
             return (
               <button

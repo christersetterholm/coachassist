@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Plus, LayoutList, Play, X } from 'lucide-react';
+import { Users, Plus, LayoutList, Play, X, UserPlus } from 'lucide-react';
 import { Exercise, SquadPlayer } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
 
@@ -11,6 +11,7 @@ interface TeamOverviewModalProps {
   onMovePlayer: (exerciseId: string, playerId: string, targetTeamId: string) => void;
   onClose: () => void;
   onStart?: () => void;
+  onAddGuest?: (name: string) => void;
 }
 
 export default function TeamOverviewModal({
@@ -19,10 +20,13 @@ export default function TeamOverviewModal({
   attendingIds,
   onMovePlayer,
   onClose,
-  onStart
+  onStart,
+  onAddGuest
 }: TeamOverviewModalProps) {
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
+  const [showGuestInput, setShowGuestInput] = useState(false);
+  const [guestName, setGuestName] = useState("");
 
   // Identify players who are attending but not in any team or joker pool
   const assignedPlayerIds = new Set([
@@ -114,6 +118,57 @@ export default function TeamOverviewModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+          {onAddGuest && (
+            <div className="mb-8 p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800">
+               {!showGuestInput ? (
+                <button
+                  onClick={() => setShowGuestInput(true)}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm"
+                >
+                  <UserPlus size={16} />
+                  Lägg till provspelare / gäst
+                </button>
+               ) : (
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (guestName.trim()) {
+                      onAddGuest(guestName.trim());
+                      setGuestName("");
+                      setShowGuestInput(false);
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    autoFocus
+                    type="text"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Namn på gäst..."
+                    className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm"
+                  >
+                    Lägg till
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGuestInput(false);
+                      setGuestName("");
+                    }}
+                    className="p-2 text-zinc-400 hover:text-red-500"
+                  >
+                    <X size={20} />
+                  </button>
+                </form>
+               )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {exercise.teams.filter(t => (t.playerIds?.length || 0) > 0 || !exercise.isFinished).map((team, idx) => {
               const isThisTeamDragging = draggedPlayerId && team.playerIds?.includes(draggedPlayerId);

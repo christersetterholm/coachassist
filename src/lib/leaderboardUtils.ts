@@ -57,7 +57,7 @@ export function calculateLeaderboard(
       if (pointsAwarded > 0) {
         totalPoints += pointsAwarded;
         history.push({
-          date: exercise.date,
+          date: exercise.finishedAt || exercise.date,
           exerciseName: exercise.name,
           points: pointsAwarded
         });

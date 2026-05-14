@@ -195,6 +195,21 @@ export default function TrainingManager({
             squad={[...squad, ...(sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams))?.guestPlayers || [])]}
             onMovePlayer={onMovePlayer}
             onClose={() => setSelectedExerciseForTeams(null)}
+            onAddGuest={(name) => {
+              const session = sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams));
+              if (session) {
+                const newGuest = {
+                  id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                  name: name.trim(),
+                };
+                onUpdateSession({
+                  ...session,
+                  guestPlayers: [...(session.guestPlayers || []), newGuest],
+                  attendance: [...(session.attendance || []), newGuest.id],
+                  updatedAt: Date.now()
+                });
+              }
+            }}
             onStart={() => {
               const id = selectedExerciseForTeams;
               setSelectedExerciseForTeams(null);

@@ -27,6 +27,7 @@ interface GameSetupProps {
   activeSessionId?: string | null;
   sessions?: TrainingSession[];
   currentPeriodId: string | null;
+  onAddGuest?: (name: string) => void;
   key?: React.Key;
 }
 
@@ -38,7 +39,7 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, currentPeriodId }: GameSetupProps) {
+export default function GameSetup({ onStartGame, initialGame, onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, currentPeriodId, onAddGuest }: GameSetupProps) {
   const combinedSquad = [...(squad || []), ...(guestPlayers || [])];
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon] = useState(initialGame?.icon || 'Trophy');
@@ -59,6 +60,8 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
   const [showPointsSettings, setShowPointsSettings] = useState(false);
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
   const [excludeGoalkeepers, setExcludeGoalkeepers] = useState(false);
+  const [showGuestInput, setShowGuestInput] = useState(false);
+  const [guestName, setGuestName] = useState("");
 
   const isGoalkeeper = (p: SquadPlayer) => {
     const pos = p.position?.toUpperCase() || '';
@@ -718,6 +721,68 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
           </div>
 
             <div className="space-y-4">
+              {onAddGuest && (
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Provspelare / Gäster</span>
+                  </div>
+                  {!showGuestInput ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowGuestInput(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 transition-all shadow-sm"
+                    >
+                      <UserPlus size={16} />
+                      Skapa ny gästspelare
+                    </button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={guestName}
+                        onChange={(e) => setGuestName(e.target.value)}
+                        placeholder="Namn..."
+                        className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (guestName.trim()) {
+                              onAddGuest(guestName.trim());
+                              setGuestName("");
+                              setShowGuestInput(false);
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (guestName.trim()) {
+                            onAddGuest(guestName.trim());
+                            setGuestName("");
+                            setShowGuestInput(false);
+                          }
+                        }}
+                        className="shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm"
+                      >
+                        Lägg till
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowGuestInput(false);
+                          setGuestName("");
+                        }}
+                        className="p-2 text-zinc-400 hover:text-red-500"
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {!sessionAttendance && (
                 <div className="space-y-2">
                   <button

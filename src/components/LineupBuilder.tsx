@@ -6,10 +6,11 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
+import ColorPicker from './ColorPicker';
 
 import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -211,11 +212,12 @@ export default function LineupBuilder({
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
+  const dragControls = useDragControls();
   const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
   const sessionToken = useMemo(() => Math.random().toString(36).substring(7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'eraser' | 'ball' | 'opponent'>('pen');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'eraser' | 'ball' | 'opponent' | 'move'>('pen');
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
@@ -248,15 +250,17 @@ export default function LineupBuilder({
     lastTapTime.current = now;
 
     // Direct eraser check
-    if (tacticalTool === 'eraser') {
+    if (tacticalTool === 'eraser' || tacticalTool === 'move') {
       pushHistory();
       if (type === 'opponent' && id) {
-        setOpponents(prev => prev.filter(o => o.id !== id));
+        if (tacticalTool === 'eraser') setOpponents(prev => prev.filter(o => o.id !== id));
       } else if (type === 'ball') {
-        setFootballPos(null);
+        if (tacticalTool === 'eraser') setFootballPos(null);
       }
-      setHasUnsavedChanges(true);
-      return;
+      if (tacticalTool === 'eraser') {
+        setHasUnsavedChanges(true);
+        return;
+      }
     }
 
     // Long press detection
@@ -276,8 +280,10 @@ export default function LineupBuilder({
 
     // Continue with normal dragging
     if (type === 'ball') {
+      pushHistory();
       setDraggingBall(true);
     } else if (type === 'opponent' && id) {
+      pushHistory();
       setDraggingOpponentId(id);
     }
   };
@@ -337,6 +343,10 @@ export default function LineupBuilder({
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
+      
+      // Deduplicate players by ID
+      const deduplicatedPlayers = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
+      setPlayers(deduplicatedPlayers);
       
       currentIdRef.current = lineup.id;
       setHasUnsavedChanges(false);
@@ -429,9 +439,9 @@ export default function LineupBuilder({
   }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
-    if (history.length === 0) return;
+    if (history.length === 0 || isRestoringHistory.current) return;
     
-    // Save current state to future before undoing
+    // Capture current state before undoing to save to future
     const currentSnapshot = {
       lineupName,
       teamName,
@@ -455,7 +465,7 @@ export default function LineupBuilder({
     
     const last = history[history.length - 1];
     setLineupHistories(prev => ({ ...prev, [currentId]: prev[currentId].slice(0, prev[currentId].length - 1) }));
-    setLineupFutures(prev => ({ ...prev, [currentId]: [currentSnapshot, ...(prev[currentId] || [])] }));
+    setLineupFutures(prev => ({ ...prev, [currentId]: [currentSnapshot, ...(prev[currentId] || [])].slice(0, 50) }));
     
     isRestoringHistory.current = true;
     
@@ -470,18 +480,24 @@ export default function LineupBuilder({
     setShowNumber(last.showNumber);
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
-    setPlayers(last.players);
-    setFootballPos(last.footballPos);
-    setOpponents(last.opponents);
-    setTacticalDrawings(last.tacticalDrawings);
+    setPlayers(JSON.parse(JSON.stringify(last.players)));
+    setFootballPos(last.footballPos ? { ...last.footballPos } : null);
+    setOpponents(JSON.parse(JSON.stringify(last.opponents)));
+    setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings)));
     setShowOpponents(last.showOpponents);
     setOpponentColor(last.opponentColor || '#ef4444');
     setCurrentFormation(last.formation);
     setHasUnsavedChanges(true);
+
+    // Reset the flag after state updates have settled
+    setTimeout(() => {
+      isRestoringHistory.current = false;
+    }, 100);
   }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
-    if (future.length === 0) return;
+    const futures = lineupFutures[currentId] || [];
+    if (futures.length === 0 || isRestoringHistory.current) return;
     
     // Save current state to history before redoing
     const currentSnapshot = {
@@ -505,9 +521,9 @@ export default function LineupBuilder({
       formation: currentFormation
     };
     
-    const next = future[0];
+    const next = futures[0];
     setLineupFutures(prev => ({ ...prev, [currentId]: prev[currentId].slice(1) }));
-    setLineupHistories(prev => ({ ...prev, [currentId]: [...(prev[currentId] || []), currentSnapshot] }));
+    setLineupHistories(prev => ({ ...prev, [currentId]: [...(prev[currentId] || []), currentSnapshot].slice(-50) }));
     
     isRestoringHistory.current = true;
     
@@ -522,15 +538,20 @@ export default function LineupBuilder({
     setShowNumber(next.showNumber);
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
-    setPlayers(next.players);
-    setFootballPos(next.footballPos);
-    setOpponents(next.opponents);
-    setTacticalDrawings(next.tacticalDrawings);
+    setPlayers(JSON.parse(JSON.stringify(next.players)));
+    setFootballPos(next.footballPos ? { ...next.footballPos } : null);
+    setOpponents(JSON.parse(JSON.stringify(next.opponents)));
+    setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings)));
     setShowOpponents(next.showOpponents);
     setOpponentColor(next.opponentColor || '#ef4444');
     setCurrentFormation(next.formation);
     setHasUnsavedChanges(true);
-  }, [currentId, future, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+
+    // Reset the flag after state updates have settled
+    setTimeout(() => {
+      isRestoringHistory.current = false;
+    }, 100);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) return;
@@ -551,6 +572,10 @@ export default function LineupBuilder({
       pushHistory();
       setFootballPos({ x, y });
       setDraggingBall(true);
+      return;
+    }
+
+    if (tacticalTool === 'move') {
       return;
     }
 
@@ -631,12 +656,8 @@ export default function LineupBuilder({
     setDraggingOpponentId(null);
   };
 
-  const undoTactical = () => {
-    setTacticalDrawings(prev => prev.slice(0, -1));
-    setHasUnsavedChanges(true);
-  };
-
   const clearTactical = () => {
+    pushHistory();
     setTacticalDrawings([]);
     setFootballPos(null);
     setOpponents([]);
@@ -967,7 +988,8 @@ export default function LineupBuilder({
         return prev;
       });
       setPlayers(prev => {
-        if (JSON.stringify(prev) !== JSON.stringify(lineup.players)) return lineup.players;
+        const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
+        if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) return deduplicated;
         return prev;
       });
       setPlayerScale(prev => {
@@ -1682,7 +1704,7 @@ export default function LineupBuilder({
           ref={isSimplified ? null : fieldRef}
           className={`football-pitch relative aspect-[2/3] rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-colors duration-500 ${
             (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') ? 'bg-sky-300' : 'bg-[#8dc343]'
-          } ${(isMaximized && !isSimplified) ? 'cursor-crosshair touch-none select-none' : ''}`}
+          } ${(isMaximized && !isSimplified) ? (tacticalTool === 'move' ? 'cursor-default' : 'cursor-crosshair') + ' touch-none select-none' : ''}`}
           onPointerDown={isSimplified ? undefined : handleTacticalStart}
           onPointerMove={isSimplified ? undefined : handleTacticalMove}
           onPointerUp={isSimplified ? undefined : handleTacticalEnd}
@@ -1876,6 +1898,7 @@ export default function LineupBuilder({
                   onPointerDown={isSimplified ? undefined : (e) => {
                     e.stopPropagation();
                     if (!isEditMode) {
+                      pushHistory();
                       setDraggingId(p.id);
                       setDragPos({ x: p.x, y: p.y });
                     }
@@ -2190,200 +2213,269 @@ export default function LineupBuilder({
             </button>
           </div>
 
-          {/* Tactical Toolbar */}
           <AnimatePresence>
             {isControlsVisible && (
               <motion.div 
+                drag
+                dragMomentum={false}
+                dragControls={dragControls}
+                dragListener={false}
+                dragConstraints={{ 
+                  left: -Math.max(0, window.innerWidth / 2 - 20), 
+                  right: Math.max(0, window.innerWidth / 2 - 20),
+                  top: -window.innerHeight + 150,
+                  bottom: 20
+                }}
                 initial={{ opacity: 0, y: 50, x: '-50%' }}
                 animate={{ opacity: 1, y: 0, x: '-50%' }}
                 exit={{ opacity: 0, y: 50, x: '-50%' }}
-                className="fixed bottom-10 left-1/2 z-[100] flex flex-col gap-3 p-3 bg-zinc-900/90 backdrop-blur-2xl rounded-[32px] border border-zinc-800 shadow-2xl w-[95vw] max-w-2xl overflow-x-auto"
+                className="fixed bottom-10 left-1/2 z-[100] flex flex-col gap-3 p-3 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-2xl w-[95vw] max-w-2xl"
               >
-            <div className="flex items-center justify-between gap-4">
-              {/* Tools row */}
-              <div className="flex items-center gap-1">
-                <button 
-                  onClick={() => setTacticalTool('pen')}
-                  className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'pen' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-                  title="Frihandspenna"
-                >
-                  <Pencil size={20} strokeWidth={2.5} />
-                </button>
-                <button 
-                  onClick={() => setTacticalTool('arrow')}
-                  className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'arrow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-                  title="Dra pilar"
-                >
-                  <ArrowUpRight size={20} strokeWidth={2.5} />
-                </button>
-                <button 
-                  onClick={() => setTacticalTool('ball')}
-                  className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-                  title="Placera boll"
-                >
-                  <Circle size={20} strokeWidth={2.5} />
-                </button>
-                <button 
-                  onClick={() => setTacticalTool('opponent')}
-                  className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'opponent' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-                  title="Placera motståndare"
-                >
-                  <Shirt size={20} strokeWidth={2.5} />
-                </button>
-                <button 
-                  onClick={() => setShowOpponentFormationModal(true)}
-                  className="p-2.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all border border-zinc-800/50"
-                  title="Motståndarformation"
-                >
-                  <Layout size={20} strokeWidth={2.5} className="text-emerald-500" />
-                </button>
-                <button 
-                  onClick={() => setShowNotesModal(true)}
-                  className="p-2.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all border border-zinc-800/50"
-                  title="Anteckningar"
-                >
-                  <ClipboardList size={20} strokeWidth={2.5} className="text-amber-500" />
-                </button>
-                <button 
-                  onClick={() => setTacticalTool('eraser')}
-                  className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}
-                  title="Suddgummi"
-                >
-                  <Eraser size={20} strokeWidth={2.5} />
-                </button>
-              </div>
-
-              {/* Settings row */}
-              <div className="flex items-center gap-2">
-                {/* Line Type */}
-                <div className="flex bg-black/40 p-1 rounded-xl">
-                  <button 
-                    onClick={() => setTacticalLineType('solid')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'solid' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}
+            <div className="flex flex-col gap-3">
+              {/* Row 1: Tools & Universal Settings */}
+              <div className="w-full min-w-0 flex items-center gap-4 pb-0.5 overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
+                <div className="flex items-center gap-1 shrink-0">
+                  <div 
+                    className="p-2 cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-400 touch-none"
+                    onPointerDown={(e) => dragControls.start(e)}
                   >
-                    Hela
+                    <GripVertical size={20} />
+                  </div>
+                  <button 
+                    onClick={() => setTacticalTool('move')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'move' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Flyttläge"
+                  >
+                    <Move size={20} strokeWidth={2.5} />
                   </button>
                   <button 
-                    onClick={() => setTacticalLineType('dashed')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'dashed' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}
+                    onClick={() => setTacticalTool('pen')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'pen' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Frihandspenna"
                   >
-                    Sträck
+                    <Pencil size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('arrow')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'arrow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Dra pilar"
+                  >
+                    <ArrowUpRight size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('ball')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Placera boll"
+                  >
+                    <Circle size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('opponent')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'opponent' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Placera motståndare"
+                  >
+                    <Shirt size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('eraser')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Suddgummi"
+                  >
+                    <Eraser size={20} strokeWidth={2.5} />
                   </button>
                 </div>
 
-                {/* Line Width */}
-                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
-                  <button 
-                    onClick={() => setTacticalLineWidth(Math.max(0.4, tacticalLineWidth - 0.2))}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <div className="flex flex-col items-center min-w-8">
-                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Linje</span>
-                    <span className="text-[10px] font-black text-white leading-none">{Math.round(tacticalLineWidth * 10)}</span>
+                <div className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Field Zoom */}
+                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
+                    <button 
+                      onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
+                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <div className="flex flex-col items-center min-w-10">
+                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Zoom</span>
+                      <span className="text-[10px] font-black text-zinc-900 dark:text-white leading-none">{Math.round(fullScreenZoom * 100)}%</span>
+                    </div>
+                    <button 
+                      onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
+                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => setTacticalLineWidth(Math.min(2.0, tacticalLineWidth + 0.2))}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
-                  >
-                    <Plus size={14} />
-                  </button>
+
+                  {/* Player Scale */}
+                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
+                    <button 
+                      onClick={() => {
+                        setPlayerScale(Math.max(0.5, playerScale - 0.05));
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <div className="flex flex-col items-center min-w-10">
+                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Skala</span>
+                      <span className="text-[10px] font-black text-zinc-900 dark:text-white leading-none">{Math.round(playerScale * 100)}%</span>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setPlayerScale(Math.min(1.5, playerScale + 0.05));
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
                 </div>
 
-                {/* Field Zoom */}
-                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
-                  <button 
-                    onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <div className="flex flex-col items-center min-w-10">
-                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Zoom</span>
-                    <span className="text-[10px] font-black text-white leading-none">{Math.round(fullScreenZoom * 100)}%</span>
+                {/* Common Actions moved to Row 1 */}
+                <div className="flex items-center gap-2 ml-auto pr-2 shrink-0">
+                  <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
+                    <button 
+                      onClick={handleUndo}
+                      className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                      title="Ångra"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                    <button 
+                      onClick={clearTactical}
+                      className="p-2 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                      title="Radera allt"
+                    >
+                      <Trash size={16} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
 
-                {/* Player Scale */}
-                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
                   <button 
-                    onClick={() => {
-                      setPlayerScale(Math.max(0.5, playerScale - 0.05));
-                      setHasUnsavedChanges(true);
-                    }}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
+                    onClick={() => setShowNotesModal(true)}
+                    className="p-2.5 rounded-xl bg-amber-600/10 text-amber-600 border border-amber-600/20 hover:bg-amber-600/20 transition-all"
+                    title="Anteckningar"
                   >
-                    <Minus size={14} />
-                  </button>
-                  <div className="flex flex-col items-center min-w-10">
-                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Spelare</span>
-                    <span className="text-[10px] font-black text-white leading-none">{Math.round(playerScale * 100)}%</span>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setPlayerScale(Math.min(1.5, playerScale + 0.05));
-                      setHasUnsavedChanges(true);
-                    }}
-                    className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-white"
-                  >
-                    <Plus size={14} />
+                    <ClipboardList size={20} />
                   </button>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between gap-4">
-              {/* Show/Hide Opponents */}
-              <button 
-                onClick={() => setShowOpponents(!showOpponents)}
-                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showOpponents ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-600/20 text-red-400 border border-red-500/30'}`}
-              >
-                {showOpponents ? 'Dölj Motstånd' : 'Visa Motstånd'}
-              </button>
+              {/* Row 2: Contextual Settings & Actions */}
+              <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
+                <AnimatePresence mode="wait">
+                  {(tacticalTool === 'pen' || tacticalTool === 'arrow') && (
+                    <motion.div 
+                      key="pen-settings"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="flex items-center gap-3 shrink-0"
+                    >
+                      {/* Pen Colors */}
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 overflow-visible">
+                        <ColorPicker 
+                          selectedColor={tacticalColor} 
+                          onChange={setTacticalColor} 
+                          direction="up"
+                          minimal={true}
+                        />
+                      </div>
 
-              <div className="flex items-center gap-4">
-                {/* Colors */}
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2 pr-4 border-r border-zinc-800">
-                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Penna</span>
-                    <button onClick={() => setTacticalColor('#ffffff')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ffffff' ? 'border-indigo-500 scale-110' : 'border-white bg-white'}`} style={{ backgroundColor: '#ffffff' }} />
-                    <button onClick={() => setTacticalColor('#ef4444')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#ef4444' ? 'border-indigo-500 scale-110' : 'border-red-500'}`} style={{ backgroundColor: '#ef4444' }} />
-                    <button onClick={() => setTacticalColor('#facc15')} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${tacticalColor === '#facc15' ? 'border-indigo-500 scale-110' : 'border-yellow-400'}`} style={{ backgroundColor: '#facc15' }} />
-                  </div>
+                      {/* Line Type */}
+                      <div className="flex bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
+                        <button 
+                          onClick={() => setTacticalLineType('solid')}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'solid' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                        >
+                          Hel
+                        </button>
+                        <button 
+                          onClick={() => setTacticalLineType('dashed')}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'dashed' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                        >
+                          Sträck
+                        </button>
+                      </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Motståndare</span>
-                    <button onClick={() => { setOpponentColor('#ef4444'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#ef4444' ? 'border-indigo-500 scale-110' : 'border-red-500/50'}`} style={{ backgroundColor: '#ef4444' }} />
-                    <button onClick={() => { setOpponentColor('#ffffff'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#ffffff' ? 'border-indigo-500 scale-110' : 'border-white/50'}`} style={{ backgroundColor: '#ffffff' }} />
-                    <button onClick={() => { setOpponentColor('#3b82f6'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#3b82f6' ? 'border-indigo-500 scale-110' : 'border-blue-500/50'}`} style={{ backgroundColor: '#3b82f6' }} />
-                    <button onClick={() => { setOpponentColor('#18181b'); setHasUnsavedChanges(true); }} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-95 ${opponentColor === '#18181b' ? 'border-indigo-500 scale-110' : 'border-zinc-800'}`} style={{ backgroundColor: '#18181b' }} />
-                  </div>
-                </div>
+                      {/* Line Width */}
+                      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
+                        <button 
+                          onClick={() => setTacticalLineWidth(Math.max(0.4, tacticalLineWidth - 0.2))}
+                          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <div className="flex flex-col items-center min-w-8">
+                          <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Bredd</span>
+                          <span className="text-[10px] font-black text-zinc-900 dark:text-white">{Math.round(tacticalLineWidth * 10)}</span>
+                        </div>
+                        <button 
+                          onClick={() => setTacticalLineWidth(Math.min(2.0, tacticalLineWidth + 0.2))}
+                          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 border-l border-zinc-800 pl-4">
-                  <button 
-                    onClick={undoTactical}
-                    className="p-2 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all active:scale-90"
-                    title="Ångra"
-                  >
-                    <RotateCcw size={18} />
-                  </button>
-                  <button 
-                    onClick={clearTactical}
-                    className="p-2 rounded-xl text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-all active:scale-90"
-                    title="Radera allt"
-                  >
-                    <Trash size={18} />
-                  </button>
-                </div>
+                  {tacticalTool === 'opponent' && (
+                    <motion.div 
+                      key="opponent-settings"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="flex items-center gap-3 shrink-0"
+                    >
+                      {/* Opponent Colors */}
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 overflow-visible">
+                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Färg</span>
+                        <ColorPicker 
+                          selectedColor={opponentColor} 
+                          onChange={(color) => {
+                            setOpponentColor(color);
+                            setHasUnsavedChanges(true);
+                          }} 
+                          direction="up"
+                          minimal={true}
+                        />
+                      </div>
+
+                      {/* Opponent Formation Button */}
+                      <button 
+                        onClick={() => setShowOpponentFormationModal(true)}
+                        className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-2"
+                      >
+                        <Layout size={14} />
+                        <span>Formation</span>
+                      </button>
+
+                      {/* Show/Hide Opponents */}
+                      <button 
+                        onClick={() => setShowOpponents(!showOpponents)}
+                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border ${showOpponents ? 'bg-emerald-600/10 text-emerald-400 border-emerald-500/30' : 'bg-red-600/10 text-red-400 border-red-500/30'}`}
+                      >
+                        {showOpponents ? 'Dölj Motstånd' : 'Visa Motstånd'}
+                      </button>
+                    </motion.div>
+                  )}
+
+                  {tacticalTool === 'move' && (
+                    <motion.div 
+                      key="move-info"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="flex items-center px-4 py-2 bg-white/5 rounded-xl"
+                    >
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Flyttläge aktivt</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </motion.div>

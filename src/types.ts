@@ -132,6 +132,7 @@ export interface Exercise {
   createdAt: number;
   updatedAt: number;
   isFinished?: boolean;
+  finishedAt?: number;
   jokerPlayerIds?: string[];
   pointsConfig?: PointsConfig;
   periodId?: string;

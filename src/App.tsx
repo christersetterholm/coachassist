@@ -122,6 +122,43 @@ export default function App() {
 
   // Notification Scheduler for Training Moments
   useEffect(() => {
+    // Prevent iOS "Shake to Undo" dialog
+    const handleUndo = (e: any) => {
+      // iOS triggers 'beforeinput' with inputType 'historyUndo' or 'historyRedo' when shaking
+      if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const preventDefault = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    // Also, clear focus when entering exercise mode to avoid triggering the system undo manager
+    if (view === 'exercise') {
+      const activeElement = document.activeElement as HTMLElement;
+      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+        activeElement.blur();
+      }
+      // Force focus to non-editable body
+      window.focus();
+    }
+
+    // Capture phase is important here
+    window.addEventListener('beforeinput', handleUndo, true);
+    document.addEventListener('undo', preventDefault, true);
+    document.addEventListener('redo', preventDefault, true);
+
+    return () => {
+      window.removeEventListener('beforeinput', handleUndo, true);
+      document.removeEventListener('undo', preventDefault, true);
+      document.removeEventListener('redo', preventDefault, true);
+    };
+  }, [view]);
+
+  useEffect(() => {
     const checkNotifications = () => {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
@@ -962,6 +999,7 @@ export default function App() {
         return {
           ...e,
           isFinished: true,
+          finishedAt: Date.now(),
           updatedAt: Date.now(),
           periodId: finishTargetPeriodId || undefined
         };
@@ -982,6 +1020,7 @@ export default function App() {
         return {
           ...e,
           isFinished: false,
+          finishedAt: undefined,
           updatedAt: Date.now(),
         };
       })
@@ -1260,7 +1299,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 ${(view === 'exercise' || view === 'teampage') ? 'h-[100dvh] overflow-hidden' : 'min-h-screen pb-24'}`}>
+    <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 ${(view === 'exercise' || view === 'teampage') ? 'h-[100dvh] overflow-hidden select-none' : 'min-h-screen pb-24'}`}>
       {view !== 'lineup' && (
         <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 ${view === 'exercise' ? 'sticky top-0' : ''}`}>
           <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -1566,6 +1605,23 @@ export default function App() {
                 activeSessionId={effectiveSessionId}
                 sessions={sessions}
                 currentPeriodId={currentPeriodId}
+                onAddGuest={(name) => {
+                  if (effectiveSessionId) {
+                    const sessionToUpdate = sessions.find(s => s.id === effectiveSessionId);
+                    if (sessionToUpdate) {
+                      const newGuest = {
+                        id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                        name: name.trim(),
+                      };
+                      onUpdateSession({
+                        ...sessionToUpdate,
+                        guestPlayers: [...(sessionToUpdate.guestPlayers || []), newGuest],
+                        attendance: [...(sessionToUpdate.attendance || []), newGuest.id],
+                        updatedAt: Date.now()
+                      });
+                    }
+                  }
+                }}
                 initialGame={isEditingActiveExercise 
                   ? exerciseBeingEdited 
                   : (prefilledName ? { name: prefilledName, teams: [], icon: 'Dribbble' } as any : undefined)
