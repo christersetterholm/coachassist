@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Home as HomeIcon, Plus, UserPlus, X, Check, Sun, Moon, Timer as TimerIcon, Edit2, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Users, LayoutDashboard, Calendar, Share2, Lock, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant, TrainingSession } from './types';
+import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant, TrainingSession, TrainingSettings, CoachData } from './types';
 import { auth, signInWithGoogle, db } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
@@ -27,20 +27,6 @@ import { CachedImage } from './components/CachedImage';
 
 type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage';
 
-interface CoachData {
-  squad: SquadPlayer[];
-  exercises: Exercise[];
-  sessions: TrainingSession[];
-  lineups: Lineup[];
-  activeLineupId: string | null;
-  periods: Period[];
-  currentPeriodId: string | null;
-  activeExerciseId: string | null;
-  teamUrl?: string;
-  customFormations?: FormationVariant[];
-  pinnedFormationIds?: string[];
-}
-
 const INITIAL_DATA: CoachData = {
   squad: [],
   exercises: [],
@@ -51,8 +37,14 @@ const INITIAL_DATA: CoachData = {
   currentPeriodId: null,
   activeExerciseId: null,
   teamUrl: '',
+  adminUrl: '',
+  seriesUrl: '',
   customFormations: [],
-  pinnedFormationIds: ['4-2-3-1', '4-4-2', '4-3-3']
+  pinnedFormationIds: ['4-2-3-1', '4-4-2', '4-3-3'],
+  trainingSettings: {
+    defaultStartTime: '18:00',
+    defaultDuration: 90
+  }
 };
 
 export default function App() {
@@ -74,8 +66,11 @@ export default function App() {
     currentPeriodId, 
     activeExerciseId, 
     teamUrl = '', 
+    adminUrl = '',
+    seriesUrl = '',
     customFormations = [], 
-    pinnedFormationIds = ['4-2-3-1', '4-4-2', '4-3-3'] 
+    pinnedFormationIds = ['4-2-3-1', '4-4-2', '4-3-3'],
+    trainingSettings = INITIAL_DATA.trainingSettings
   } = (data || INITIAL_DATA);
   const [sessionActionCount, setSessionActionCount] = useState(0);
   const [linkToMomentId, setLinkToMomentId] = useState<string | null>(null);
@@ -223,7 +218,10 @@ export default function App() {
       const savedCurrentPeriodId = localStorage.getItem('current_period_id');
       const savedActiveExerciseId = localStorage.getItem('active_exercise_id');
       const savedTeamUrl = localStorage.getItem('team_url');
+      const savedAdminUrl = localStorage.getItem('admin_url');
+      const savedSeriesUrl = localStorage.getItem('series_url');
       const savedCustomFormations = localStorage.getItem('custom_formations');
+      const savedSettings = localStorage.getItem('training_settings');
 
       const newState: CoachData = {
         squad: savedSquad ? JSON.parse(savedSquad) : [],
@@ -235,8 +233,11 @@ export default function App() {
         currentPeriodId: savedCurrentPeriodId || null,
         activeExerciseId: savedActiveExerciseId || null,
         teamUrl: savedTeamUrl || '',
+        adminUrl: savedAdminUrl || '',
+        seriesUrl: savedSeriesUrl || '',
         customFormations: savedCustomFormations ? JSON.parse(savedCustomFormations) : [],
-        pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3']
+        pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
+        trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
       };
 
       setData(newState);
@@ -258,7 +259,10 @@ export default function App() {
       localStorage.setItem('current_period_id', currentPeriodId || '');
       localStorage.setItem('active_exercise_id', activeExerciseId || '');
       localStorage.setItem('team_url', teamUrl || '');
+      localStorage.setItem('admin_url', adminUrl || '');
+      localStorage.setItem('series_url', seriesUrl || '');
       localStorage.setItem('custom_formations', JSON.stringify(customFormations));
+      localStorage.setItem('training_settings', JSON.stringify(trainingSettings));
       localStorage.setItem('pinned_formations', JSON.stringify(pinnedFormationIds));
       localStorage.setItem('last_local_sync_at', Date.now().toString());
     }
@@ -318,6 +322,8 @@ export default function App() {
               const savedCurrentPeriodId = localStorage.getItem('current_period_id');
               const savedActiveExerciseId = localStorage.getItem('active_exercise_id');
               const savedTeamUrl = localStorage.getItem('team_url');
+              const savedAdminUrl = localStorage.getItem('admin_url');
+              const savedSeriesUrl = localStorage.getItem('series_url');
 
               const newState: CoachData = {
                 squad: JSON.parse(savedSquad),
@@ -329,6 +335,8 @@ export default function App() {
                 currentPeriodId: savedCurrentPeriodId || null,
                 activeExerciseId: savedActiveExerciseId || null,
                 teamUrl: savedTeamUrl || '',
+                adminUrl: savedAdminUrl || '',
+                seriesUrl: savedSeriesUrl || '',
                 customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
                 pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3']
               };
@@ -367,6 +375,8 @@ export default function App() {
           currentPeriodId: cloudData.currentPeriodId || null,
           activeExerciseId: cloudData.activeExerciseId || null,
           teamUrl: cloudData.teamUrl || '',
+          adminUrl: cloudData.adminUrl || '',
+          seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
           pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']
         };
@@ -401,7 +411,7 @@ export default function App() {
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid) return;
         
-        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds };
+        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds };
         
         // Skip if current state matches what we last saw from cloud
         if (lastCloudDataRef.current) {
@@ -802,11 +812,22 @@ export default function App() {
   };
 
   const onNewSession = () => {
+    let endTime = trainingSettings?.defaultEndTime;
+    
+    if (!endTime && trainingSettings?.defaultStartTime && trainingSettings?.defaultDuration) {
+      const [h, m] = trainingSettings.defaultStartTime.split(':').map(Number);
+      const date = new Date();
+      date.setHours(h, m, 0, 0);
+      date.setMinutes(date.getMinutes() + trainingSettings.defaultDuration);
+      endTime = date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    }
+
     const newSession: TrainingSession = {
       id: crypto.randomUUID(),
       title: '',
       date: Date.now(),
-      startTime: '18:00',
+      startTime: trainingSettings?.defaultStartTime || '18:00',
+      endTime: endTime,
       moments: [],
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -953,6 +974,16 @@ export default function App() {
 
   const handleUpdateTeamUrl = (url: string) => {
     setData(prev => ({ ...prev, teamUrl: url }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const handleUpdateAdminUrl = (url: string) => {
+    setData(prev => ({ ...prev, adminUrl: url }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const handleUpdateSeriesUrl = (url: string) => {
+    setData(prev => ({ ...prev, seriesUrl: url }));
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -1235,6 +1266,8 @@ export default function App() {
           currentPeriodId: cloudData.currentPeriodId || null,
           activeExerciseId: cloudData.activeExerciseId || null,
           teamUrl: cloudData.teamUrl || '',
+          adminUrl: cloudData.adminUrl || '',
+          seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
           pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']
         };
@@ -1281,6 +1314,11 @@ export default function App() {
         squad: newSquad
       };
     });
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onUpdateSettings = (settings: TrainingSettings) => {
+    setData(prev => ({ ...prev, trainingSettings: settings }));
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -1530,6 +1568,8 @@ export default function App() {
                   squad={squad}
                   activeTab={trainingTab}
                   onTabChange={setTrainingTab}
+                  settings={trainingSettings}
+                  onUpdateSettings={onUpdateSettings}
                   onSelectExercise={(id) => {
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setView('exercise');
@@ -1853,6 +1893,10 @@ export default function App() {
               <TeamPage 
                 initialUrl={teamUrl}
                 onUpdateUrl={handleUpdateTeamUrl}
+                initialAdminUrl={adminUrl}
+                onUpdateAdminUrl={handleUpdateAdminUrl}
+                initialSeriesUrl={seriesUrl}
+                onUpdateSeriesUrl={handleUpdateSeriesUrl}
               />
               {/* Spacer for bottom nav when not in standalone full-height mode */}
               <div className="h-20 shrink-0" />

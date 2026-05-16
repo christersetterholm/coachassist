@@ -1,26 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, RefreshCcw, Home, Settings, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Globe, RefreshCcw, Home, Settings, ExternalLink, ChevronLeft, ChevronRight, ShieldCheck, Trophy, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TeamPageProps {
   initialUrl?: string;
   onUpdateUrl: (url: string) => void;
+  initialAdminUrl?: string;
+  onUpdateAdminUrl: (url: string) => void;
+  initialSeriesUrl?: string;
+  onUpdateSeriesUrl: (url: string) => void;
 }
 
-export default function TeamPage({ initialUrl = '', onUpdateUrl }: TeamPageProps) {
+export default function TeamPage({ 
+  initialUrl = '', 
+  onUpdateUrl,
+  initialAdminUrl = '',
+  onUpdateAdminUrl,
+  initialSeriesUrl = '',
+  onUpdateSeriesUrl
+}: TeamPageProps) {
   const [url, setUrl] = useState(initialUrl);
   const [isEditing, setIsEditing] = useState(!initialUrl);
   const [tempUrl, setTempUrl] = useState(initialUrl);
+  const [tempAdminUrl, setTempAdminUrl] = useState(initialAdminUrl);
+  const [tempSeriesUrl, setTempSeriesUrl] = useState(initialSeriesUrl);
   const [iframeKey, setIframeKey] = useState(0);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    let formattedUrl = tempUrl.trim();
-    if (formattedUrl && !/^https?:\/\//i.test(formattedUrl)) {
-      formattedUrl = 'https://' + formattedUrl;
-    }
-    setUrl(formattedUrl);
-    onUpdateUrl(formattedUrl);
+    
+    const formatUrl = (u: string) => {
+      let formatted = u.trim();
+      if (formatted && !/^https?:\/\//i.test(formatted)) {
+        formatted = 'https://' + formatted;
+      }
+      return formatted;
+    };
+
+    const formattedTeamUrl = formatUrl(tempUrl);
+    const formattedAdminUrl = formatUrl(tempAdminUrl);
+    const formattedSeriesUrl = formatUrl(tempSeriesUrl);
+
+    setUrl(formattedTeamUrl);
+    onUpdateUrl(formattedTeamUrl);
+    onUpdateAdminUrl(formattedAdminUrl);
+    onUpdateSeriesUrl(formattedSeriesUrl);
+    
     setIsEditing(false);
     setIframeKey(prev => prev + 1);
   };
@@ -37,51 +62,77 @@ export default function TeamPage({ initialUrl = '', onUpdateUrl }: TeamPageProps
 
   if (isEditing) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-950">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-950 overflow-y-auto">
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[32px] p-8 shadow-2xl border border-zinc-100 dark:border-zinc-800"
         >
-          <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-6 mx-auto">
-            <Globe size={32} />
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Inställningar</h2>
+            {initialUrl && (
+              <button 
+                onClick={() => setIsEditing(false)}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+              >
+                <X size={24} />
+              </button>
+            )}
           </div>
-          <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-2 text-center tracking-tight">Ställ in lagsida</h2>
-          <p className="text-zinc-500 dark:text-zinc-400 mb-8 text-center font-medium">
-            Ange webbadressen till lagets hemsida eller kalender.
-          </p>
           
-          <form onSubmit={handleSave} className="space-y-4">
+          <form onSubmit={handleSave} className="space-y-6">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Webbadress</label>
-              <input
-                type="text"
-                value={tempUrl}
-                onChange={(e) => setTempUrl(e.target.value)}
-                placeholder="https://laget.se/..."
-                className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                autoFocus
-              />
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Lagsida (Visas här)</label>
+              <div className="relative group">
+                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+                <input
+                  type="text"
+                  value={tempUrl}
+                  onChange={(e) => setTempUrl(e.target.value)}
+                  placeholder="https://laget.se/..."
+                  className="w-full pl-12 pr-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
+                />
+              </div>
             </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Adminsida (Extern länk)</label>
+              <div className="relative group">
+                <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+                <input
+                  type="text"
+                  value={tempAdminUrl}
+                  onChange={(e) => setTempAdminUrl(e.target.value)}
+                  placeholder="Länk till adminverktyg..."
+                  className="w-full pl-12 pr-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Serien/Tabellen (Extern länk)</label>
+              <div className="relative group">
+                <Trophy className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+                <input
+                  type="text"
+                  value={tempSeriesUrl}
+                  onChange={(e) => setTempSeriesUrl(e.target.value)}
+                  placeholder="Länk till fotbollsförbundet..."
+                  className="w-full pl-12 pr-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
+                />
+              </div>
+            </div>
+
             <button
               type="submit"
               className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
             >
-              Spara och visa
+              Spara inställningar
             </button>
-            {initialUrl && (
-              <button
-                type="button"
-                onClick={() => setIsEditing(false)}
-                className="w-full py-4 text-zinc-500 font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-2xl transition-all"
-              >
-                Avbryt
-              </button>
-            )}
           </form>
           
           <p className="mt-6 text-[10px] text-zinc-400 text-center leading-relaxed">
-            Obs: Vissa webbplatser tillåter inte inbäddning (iFrames). Om sidan förblir tom kan du prova att använda en annan länk eller öppna sidan direkt.
+            Obs: Lagsidan bäddas in i appen. Admin och Serien öppnas i en ny flik för bäst kompatibilitet.
           </p>
         </motion.div>
       </div>
@@ -135,6 +186,28 @@ export default function TeamPage({ initialUrl = '', onUpdateUrl }: TeamPageProps
         )}
 
         <div className="flex items-center gap-1 sm:gap-2">
+          {initialAdminUrl && (
+            <a 
+              href={initialAdminUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
+              title="Öppna Adminsida"
+            >
+              <ShieldCheck size={18} />
+            </a>
+          )}
+          {initialSeriesUrl && (
+            <a 
+              href={initialSeriesUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
+              title="Öppna Serien/Tabellen"
+            >
+              <Trophy size={18} />
+            </a>
+          )}
           <button 
             onClick={() => setIsEditing(true)}
             className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"

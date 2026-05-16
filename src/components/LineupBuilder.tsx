@@ -6,7 +6,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, MousePointer2, Route } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -217,7 +217,14 @@ export default function LineupBuilder({
   const sessionToken = useMemo(() => Math.random().toString(36).substring(7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'eraser' | 'ball' | 'opponent' | 'move'>('pen');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move'>('pen');
+
+  // Sync tactical players if empty when opening rittavla
+  useEffect(() => {
+    if (isMaximized && tacticalPlayers.length === 0 && players.length > 0) {
+      setTacticalPlayers(JSON.parse(JSON.stringify(players)));
+    }
+  }, [isMaximized, players.length]);
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
@@ -226,6 +233,7 @@ export default function LineupBuilder({
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
   const [opponentColor, setOpponentColor] = useState(lineup?.tacticalBoard?.opponentColor || '#ef4444');
+  const [tacticalPlayers, setTacticalPlayers] = useState<LineupPlayer[]>(lineup?.tacticalBoard?.players || []);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number, y: number }[]>([]);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -343,10 +351,14 @@ export default function LineupBuilder({
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
+      setTacticalPlayers(lineup.tacticalBoard?.players || []);
       
       // Deduplicate players by ID
       const deduplicatedPlayers = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
       setPlayers(deduplicatedPlayers);
+
+      // If we switch lineup and there are no tactical players, we bisa initialize them or keep them empty.
+      // But usually we want them to stay if we switch back.
       
       currentIdRef.current = lineup.id;
       setHasUnsavedChanges(false);
@@ -424,6 +436,7 @@ export default function LineupBuilder({
         teamLogoUrl,
         pitchType,
         players: JSON.parse(JSON.stringify(players)),
+        tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
         footballPos: footballPos ? { ...footballPos } : null,
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -436,7 +449,7 @@ export default function LineupBuilder({
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, tacticalPlayers, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0 || isRestoringHistory.current) return;
@@ -455,6 +468,7 @@ export default function LineupBuilder({
       teamLogoUrl,
       pitchType,
       players: JSON.parse(JSON.stringify(players)),
+      tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -481,6 +495,7 @@ export default function LineupBuilder({
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
     setPlayers(JSON.parse(JSON.stringify(last.players)));
+    setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players)));
     setFootballPos(last.footballPos ? { ...last.footballPos } : null);
     setOpponents(JSON.parse(JSON.stringify(last.opponents)));
     setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings)));
@@ -513,6 +528,7 @@ export default function LineupBuilder({
       teamLogoUrl,
       pitchType,
       players: JSON.parse(JSON.stringify(players)),
+      tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -539,6 +555,7 @@ export default function LineupBuilder({
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
     setPlayers(JSON.parse(JSON.stringify(next.players)));
+    setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players)));
     setFootballPos(next.footballPos ? { ...next.footballPos } : null);
     setOpponents(JSON.parse(JSON.stringify(next.opponents)));
     setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings)));
@@ -624,7 +641,7 @@ export default function LineupBuilder({
 
     if (!isDrawing) return;
 
-    if (tacticalTool === 'pen') {
+    if (tacticalTool === 'pen' || tacticalTool === 'freehand-arrow') {
       setCurrentPath(prev => [...prev, { x, y }]);
     } else if (tacticalTool === 'arrow') {
       setCurrentPath(prev => [prev[0], { x, y }]);
@@ -661,6 +678,7 @@ export default function LineupBuilder({
     setTacticalDrawings([]);
     setFootballPos(null);
     setOpponents([]);
+    setTacticalPlayers(JSON.parse(JSON.stringify(players)));
     setHasUnsavedChanges(true);
   };
 
@@ -878,7 +896,7 @@ export default function LineupBuilder({
       let closestId = null;
       let minDistance = 4; // Further reduced radius (from 6) to avoid accidental "sucking"
 
-      players.forEach(p => {
+      activePlayers.forEach(p => {
         if (p.id === draggingId || p.isSubstitute) return;
         
         const dx = rawX - p.x;
@@ -916,7 +934,7 @@ export default function LineupBuilder({
           // --- SWAP LOGIC ---
           pushHistory();
           
-          setPlayers(prev => {
+          setActivePlayers((prev: LineupPlayer[]) => {
             const dPlayer = prev.find(p => p.id === draggingId);
             const tPlayer = prev.find(p => p.id === targetId);
             
@@ -939,14 +957,14 @@ export default function LineupBuilder({
           });
         } else if (isInFieldX && isInFieldY) {
           pushHistory();
-          setPlayers(prev => prev.map(p => 
+          setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
             p.id === draggingId 
               ? { ...p, isSubstitute: false, x: info.x, y: info.y, isHolding: false } 
               : p
           ));
         } else {
           pushHistory();
-          setPlayers(prev => prev.map(p => 
+          setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
             p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
           ));
         }
@@ -966,7 +984,7 @@ export default function LineupBuilder({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [draggingId, players, pushHistory]);
+  }, [draggingId, players, tacticalPlayers, isMaximized, pushHistory]);
 
   useEffect(() => {
     // Ignore internal prop updates for 2 seconds after a local change
@@ -1167,7 +1185,8 @@ export default function LineupBuilder({
         footballPos,
         opponents,
         showOpponents,
-        opponentColor
+        opponentColor,
+        players: tacticalPlayers
       }
     };
 
@@ -1206,6 +1225,7 @@ export default function LineupBuilder({
       lineup.formation !== currentFormation ||
       pitchType !== lineup.pitchType ||
       JSON.stringify(lineup.players) !== JSON.stringify(players) ||
+      JSON.stringify(lineup.tacticalBoard?.players || []) !== JSON.stringify(tacticalPlayers) ||
       JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard) ||
       JSON.stringify(remoteNotes) !== JSON.stringify(currentState.notes);
 
@@ -1219,7 +1239,7 @@ export default function LineupBuilder({
     }, 800); // Reduced from 1500ms to 800ms for snappier feel
     
     return () => clearTimeout(timeout);
-  }, [lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
+  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -1264,7 +1284,7 @@ export default function LineupBuilder({
       }
     });
 
-    setPlayers(newPlayers);
+    setActivePlayers(newPlayers);
     setShowFormationModal(false);
     setHasUnsavedChanges(true);
   };
@@ -1537,18 +1557,18 @@ export default function LineupBuilder({
   };
 
   const togglePlayerInLineup = (playerId: string, isSubstitute: boolean) => {
-    const existingPlayer = players.find(p => p.playerId === playerId);
+    const existingPlayer = activePlayers.find(p => p.playerId === playerId);
     
     pushHistory();
     if (existingPlayer) {
       // If it exists but with different status, update status
       if (existingPlayer.isSubstitute !== isSubstitute) {
-        setPlayers(prev => prev.map(p => 
+        setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
           p.playerId === playerId ? { ...p, isSubstitute } : p
         ));
       } else {
         // If it exists with same status, remove it
-        setPlayers(prev => prev.filter(p => p.playerId !== playerId));
+        setActivePlayers((prev: LineupPlayer[]) => prev.filter(p => p.playerId !== playerId));
       }
     } else {
       // Add new player correctly positioned
@@ -1559,14 +1579,14 @@ export default function LineupBuilder({
         y: isSubstitute ? 95 : 50,
         isSubstitute
       };
-      setPlayers(prev => [...prev, newPlayer]);
+      setActivePlayers((prev: LineupPlayer[]) => [...prev, newPlayer]);
     }
     setHasUnsavedChanges(true);
   };
 
   const updatePlayerPosition = (id: string, x: number, y: number) => {
     pushHistory();
-    setPlayers(prev => prev.map(p => {
+    setActivePlayers((prev: LineupPlayer[]) => prev.map(p => {
       if (p.id === id) {
         return { ...p, x, y };
       }
@@ -1577,7 +1597,7 @@ export default function LineupBuilder({
 
   const toggleSubstitute = (id: string) => {
     pushHistory();
-    setPlayers(prev => prev.map(p => 
+    setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
       p.id === id ? { ...p, isSubstitute: !p.isSubstitute } : p
     ));
     setHasUnsavedChanges(true);
@@ -1585,7 +1605,7 @@ export default function LineupBuilder({
 
   const removePlayer = (id: string) => {
     pushHistory();
-    setPlayers(prev => prev.filter(p => p.id !== id));
+    setActivePlayers((prev: LineupPlayer[]) => prev.filter(p => p.id !== id));
     setSelectedForEdit(null);
     setHasUnsavedChanges(true);
   };
@@ -1604,10 +1624,13 @@ export default function LineupBuilder({
 
   const getSquadPlayer = (id: string) => squad.find(s => s.id === id);
   
+  const activePlayers = isMaximized ? tacticalPlayers : players;
+  const setActivePlayers = isMaximized ? setTacticalPlayers : setPlayers;
+
   const validLineupPlayers = useMemo(() => {
     const uniqueIds = new Set<string>();
     const uniquePlayerIds = new Set<string>();
-    return players.filter(p => {
+    return activePlayers.filter(p => {
       // Must be in squad
       if (!squad.some(s => s.id === p.playerId)) return false;
       // Must have unique instance ID to avoid map key collisions
@@ -1619,7 +1642,7 @@ export default function LineupBuilder({
       uniquePlayerIds.add(p.playerId);
       return true;
     });
-  }, [players, squad]);
+  }, [activePlayers, squad]);
 
   const starters = useMemo(() => validLineupPlayers.filter(p => !p.isSubstitute), [validLineupPlayers]);
   const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
@@ -1741,7 +1764,7 @@ export default function LineupBuilder({
               {/* Previous Drawings */}
               {tacticalDrawings.map((draw) => (
                 <g key={draw.id}>
-                  {draw.type === 'pen' ? (
+                  {draw.type === 'pen' || draw.type === 'freehand-arrow' ? (
                     <path
                       d={`M ${draw.points[0].x} ${draw.points[0].y} ${draw.points.slice(1).map((p: any) => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
@@ -1750,6 +1773,7 @@ export default function LineupBuilder({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                      markerEnd={draw.type === 'freehand-arrow' ? `url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
                     />
                   ) : (
                     <line
@@ -1769,7 +1793,7 @@ export default function LineupBuilder({
               {/* Current Drawing */}
               {!isSimplified && isDrawing && currentPath.length > 1 && (
                 <g>
-                   {tacticalTool === 'pen' ? (
+                   {tacticalTool === 'pen' || tacticalTool === 'freehand-arrow' ? (
                     <path
                       d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
@@ -1778,6 +1802,7 @@ export default function LineupBuilder({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                      markerEnd={tacticalTool === 'freehand-arrow' ? `url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
                     />
                   ) : (
                     <line
@@ -2120,7 +2145,7 @@ export default function LineupBuilder({
                       } else {
                         // Quick add to holding area on pitch
                         pushHistory();
-                        setPlayers(prev => prev.map(lp => 
+                        setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
                           lp.id === p.id 
                             ? { ...lp, isSubstitute: false, x: 50, y: 92, isHolding: true } 
                             : { ...lp, isHolding: false } // Clear others
@@ -2207,7 +2232,7 @@ export default function LineupBuilder({
             <button
               onClick={() => setIsMaximized(false)}
               className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
-              title="Lämna fullskärm"
+              title="Lämna rittavlan"
             >
               <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
             </button>
@@ -2261,6 +2286,13 @@ export default function LineupBuilder({
                     title="Dra pilar"
                   >
                     <ArrowUpRight size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('freehand-arrow')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'freehand-arrow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Frihandspil"
+                  >
+                    <Route size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('ball')}
@@ -2367,7 +2399,7 @@ export default function LineupBuilder({
               {/* Row 2: Contextual Settings & Actions */}
               <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
                 <AnimatePresence mode="wait">
-                  {(tacticalTool === 'pen' || tacticalTool === 'arrow') && (
+                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow') && (
                     <motion.div 
                       key="pen-settings"
                       initial={{ opacity: 0, x: -10 }}
@@ -2594,7 +2626,7 @@ export default function LineupBuilder({
               <button
                 onClick={() => setIsMaximized(!isMaximized)}
                 className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
-                title={isMaximized ? "Lämna fullskärm" : "Fullskärm"}
+                title={isMaximized ? "Lämna rittavlan" : "Rittavla"}
               >
                 {isMaximized ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
               </button>

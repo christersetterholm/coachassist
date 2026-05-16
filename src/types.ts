@@ -48,6 +48,7 @@ export interface Lineup {
     opponents: { id: string, x: number, y: number }[];
     showOpponents: boolean;
     opponentColor?: string;
+    players?: LineupPlayer[];
   };
 }
 
@@ -100,6 +101,29 @@ export interface SessionMoment {
   imageUrl?: string;
   imageUrls?: string[];
   externalLink?: string;
+}
+
+export interface TrainingSettings {
+  defaultStartTime: string;
+  defaultEndTime?: string;
+  defaultDuration?: number;
+}
+
+export interface CoachData {
+  squad: SquadPlayer[];
+  exercises: Exercise[];
+  sessions: TrainingSession[];
+  lineups: Lineup[];
+  activeLineupId: string | null;
+  periods: Period[];
+  currentPeriodId: string | null;
+  activeExerciseId: string | null;
+  teamUrl?: string;
+  adminUrl?: string;
+  seriesUrl?: string;
+  customFormations?: FormationVariant[];
+  pinnedFormationIds?: string[];
+  trainingSettings?: TrainingSettings;
 }
 
 export interface TrainingSession {
