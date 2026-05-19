@@ -23,7 +23,7 @@ export interface Lineup {
   players: LineupPlayer[];
   playerScale?: number; // 0.5 to 1.5
   nameTagStyle?: 'light' | 'dark';
-  nameDisplayMode?: 'first' | 'last' | 'full';
+  nameDisplayMode?: 'first' | 'last' | 'full' | 'initials';
   showNameBackground?: boolean;
   nameBackgroundType?: 'classic' | 'badge' | 'minimal' | 'solid' | 'none' | 'transparent';
   formation?: string;
@@ -31,7 +31,9 @@ export interface Lineup {
   showNumber?: boolean;
   isArchived?: boolean;
   teamLogoUrl?: string;
-  pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass';
+  pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black';
+  orientation?: 'vertical' | 'landscape';
+  attackDirection?: 'up' | 'down' | 'left' | 'right';
   notes?: {
     team?: {
       text: string;

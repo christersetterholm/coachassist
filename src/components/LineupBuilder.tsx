@@ -50,6 +50,7 @@ interface LineupReorderItemProps {
   toggleArchive: (e: any, id: string) => void;
   onCopyLineup: (id: string) => void;
   onDeleteLineup: (id: string) => void;
+  onEditTitle: (id: string, title: string, team: string) => void;
 }
 
 function LineupReorderItem({ 
@@ -58,7 +59,8 @@ function LineupReorderItem({
   onSelectLineup, 
   toggleArchive, 
   onCopyLineup, 
-  onDeleteLineup 
+  onDeleteLineup,
+  onEditTitle
 }: LineupReorderItemProps) {
   const controls = useDragControls();
 
@@ -95,6 +97,13 @@ function LineupReorderItem({
       </div>
 
       <div className="flex items-center gap-1 shrink-0 ml-2">
+        <button
+          onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '')}
+          className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+          title="Redigera rubriker"
+        >
+          <Pencil size={16} />
+        </button>
         <button
           onClick={(e) => toggleArchive(e, l.id)}
           className="p-2.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
@@ -144,7 +153,7 @@ export default function LineupBuilder({
   const [players, setPlayers] = useState<LineupPlayer[]>(lineup?.players || []);
   const [playerScale, setPlayerScale] = useState(lineup?.playerScale || 1);
   const [nameTagStyle, setNameTagStyle] = useState<'light' | 'dark'>(lineup?.nameTagStyle || 'light');
-  const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full'>(lineup?.nameDisplayMode || 'first');
+  const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full' | 'initials'>(lineup?.nameDisplayMode || 'first');
   const [showNameBackground, setShowNameBackground] = useState(lineup?.showNameBackground ?? true);
   const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal'>(lineup?.nameBackgroundType || 'classic');
   const [showPhoto, setShowPhoto] = useState(lineup?.showPhoto ?? true);
@@ -153,7 +162,9 @@ export default function LineupBuilder({
   const [importResult, setImportResult] = useState<{ found: string[], missing: string[] } | null>(null);
   const [showNumber, setShowNumber] = useState(lineup?.showNumber ?? true);
   const [teamLogoUrl, setTeamLogoUrl] = useState(lineup?.teamLogoUrl || '');
-  const [pitchType, setPitchType] = useState<'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass'>(lineup?.pitchType || 'classic');
+  const [pitchType, setPitchType] = useState<'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black'>(lineup?.pitchType || 'classic');
+  const [orientation, setOrientation] = useState<'vertical' | 'landscape'>(lineup?.orientation || 'vertical');
+  const [attackDirection, setAttackDirection] = useState<'up' | 'down' | 'left' | 'right'>(lineup?.attackDirection || 'up');
   const [currentFormation, setCurrentFormation] = useState<string>(lineup?.formation || '');
   
   // Custom Logo Upload States
@@ -306,6 +317,7 @@ export default function LineupBuilder({
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
   const [tempTeamName, setTempTeamName] = useState('');
+  const [editingLineupId, setEditingLineupId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [exportFormat, setExportFormat] = useState<'responsive' | 'mobile' | 'tablet' | 'desktop'>('mobile');
@@ -341,6 +353,8 @@ export default function LineupBuilder({
       setShowNumber(lineup.showNumber ?? true);
       setTeamLogoUrl(lineup.teamLogoUrl || '');
       setPitchType(lineup.pitchType || 'classic');
+      setOrientation(lineup.orientation || 'vertical');
+      setAttackDirection(lineup.attackDirection || (lineup.orientation === 'landscape' ? 'left' : 'up'));
       setCurrentFormation(lineup.formation || '');
       setTeamNotes(lineup.notes?.team?.text || '');
       setTeamMedia(lineup.notes?.team?.media || []);
@@ -435,6 +449,8 @@ export default function LineupBuilder({
         showNumber,
         teamLogoUrl,
         pitchType,
+        orientation,
+        attackDirection,
         players: JSON.parse(JSON.stringify(players)),
         tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
         footballPos: footballPos ? { ...footballPos } : null,
@@ -494,6 +510,8 @@ export default function LineupBuilder({
     setShowNumber(last.showNumber);
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
+    setOrientation(last.orientation || 'vertical');
+    setAttackDirection(last.attackDirection || (last.orientation === 'landscape' ? 'left' : 'up'));
     setPlayers(JSON.parse(JSON.stringify(last.players)));
     setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players)));
     setFootballPos(last.footballPos ? { ...last.footballPos } : null);
@@ -508,7 +526,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -554,6 +572,8 @@ export default function LineupBuilder({
     setShowNumber(next.showNumber);
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
+    setOrientation(next.orientation || 'vertical');
+    setAttackDirection(next.attackDirection || (next.orientation === 'landscape' ? 'left' : 'up'));
     setPlayers(JSON.parse(JSON.stringify(next.players)));
     setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players)));
     setFootballPos(next.footballPos ? { ...next.footballPos } : null);
@@ -568,7 +588,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) return;
@@ -623,11 +643,41 @@ export default function LineupBuilder({
     setCurrentPath([{ x, y }]);
   };
 
+  const getPitchRotation = () => {
+    if (orientation === 'landscape') {
+      return attackDirection === 'right' ? 'rotate(90deg)' : 'rotate(-90deg)';
+    }
+    return attackDirection === 'down' ? 'rotate(180deg)' : 'rotate(0deg)';
+  };
+
+  const getCounterRotation = () => {
+    if (orientation === 'landscape') {
+      return attackDirection === 'right' ? '-90deg' : '90deg';
+    }
+    return attackDirection === 'down' ? '180deg' : '0deg';
+  };
+
   const handleTacticalMove = (e: React.PointerEvent) => {
     if (!isMaximized || !fieldRef.current) return;
     const rect = fieldRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    let x = ((e.clientX - rect.left) / rect.width) * 100;
+    let y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    // Map screen relative coordinates back to pitch coordinates based on rotation
+    if (orientation === 'landscape') {
+      const vx = x;
+      const vy = y;
+      if (attackDirection === 'right') {
+        x = vy;
+        y = 100 - vx;
+      } else { // left
+        x = 100 - vy;
+        y = vx;
+      }
+    } else if (attackDirection === 'down') {
+      x = 100 - x;
+      y = 100 - y;
+    }
 
     if (draggingBall) {
       setFootballPos({ x, y });
@@ -884,8 +934,25 @@ export default function LineupBuilder({
       if (!fieldRef.current || !dragInfoRef.current) return;
       
       const rect = fieldRef.current.getBoundingClientRect();
-      const rawX = ((e.clientX - rect.left) / rect.width) * 100;
-      const rawY = ((e.clientY - rect.top) / rect.height) * 100;
+      const rawVX = ((e.clientX - rect.left) / rect.width) * 100;
+      const rawVY = ((e.clientY - rect.top) / rect.height) * 100;
+
+      let rawX, rawY;
+      if (orientation === 'landscape') {
+        if (attackDirection === 'right') {
+          rawX = rawVY;
+          rawY = 100 - rawVX;
+        } else { // left
+          rawX = 100 - rawVY;
+          rawY = rawVX;
+        }
+      } else if (attackDirection === 'down') {
+        rawX = 100 - rawVX;
+        rawY = 100 - rawVY;
+      } else {
+        rawX = rawVX;
+        rawY = rawVY;
+      }
 
       // Clamped coordinates for the "ghost" position on field
       // Use 2 decimal places to avoid jitter and excessive state updates
@@ -1423,6 +1490,13 @@ export default function LineupBuilder({
     setIsEditingTitle(false);
   };
 
+  const openTitleEditForLineup = (id: string, currentTitle: string, currentTeam: string) => {
+    setEditingLineupId(id);
+    setTempTitle(currentTitle);
+    setTempTeamName(currentTeam);
+    setIsEditingTitle(true);
+  };
+
   const onCropComplete = (croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   };
@@ -1610,15 +1684,32 @@ export default function LineupBuilder({
     setHasUnsavedChanges(true);
   };
 
+  const handleReorderSubs = (newSubs: LineupPlayer[]) => {
+    // Keep history for undo/redo
+    // Note: Reorder triggers frequently, but pushHistory is memoized/guarded usually? 
+    // Actually in TrainingManager it was pushed on each reorder.
+    // However, if we want to avoid too many snapshots, we might need a debounce, 
+    // but typically Framer Motion sorting is interactive.
+    
+    const starters = activePlayers.filter(p => !p.isSubstitute);
+    setActivePlayers([...starters, ...newSubs]);
+    setHasUnsavedChanges(true);
+  };
+
   const updateSquadPlayerInfo = (playerId: string, updates: Partial<SquadPlayer>) => {
     onUpdateSquad(squad.map(p => p.id === playerId ? { ...p, ...updates } : p));
     setHasUnsavedChanges(true);
   };
 
   const getVisibleName = (fullName: string) => {
-    const parts = fullName.split(' ');
+    const parts = fullName.trim().split(/\s+/);
     if (nameDisplayMode === 'first') return parts[0];
     if (nameDisplayMode === 'last') return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    if (nameDisplayMode === 'initials') {
+      const first = parts[0]?.[0] || '';
+      const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return `${first}.${last}`.toUpperCase();
+    }
     return fullName;
   };
 
@@ -1725,8 +1816,16 @@ export default function LineupBuilder({
         {/* The Football Pitch */}
         <div 
           ref={isSimplified ? null : fieldRef}
-          className={`football-pitch relative aspect-[2/3] rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-colors duration-500 ${
-            (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') ? 'bg-sky-300' : 'bg-[#8dc343]'
+          className={`football-pitch relative rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-all duration-500 ${
+            orientation === 'landscape' ? 'aspect-[3/2] w-full max-w-4xl mx-auto' : 'aspect-[2/3]'
+          } ${
+            (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') 
+              ? 'bg-sky-300' 
+              : pitchType === 'solid-white' 
+                ? 'bg-white' 
+                : pitchType === 'solid-black' 
+                  ? 'bg-zinc-950' 
+                  : 'bg-[#8dc343]'
           } ${(isMaximized && !isSimplified) ? (tacticalTool === 'move' ? 'cursor-default' : 'cursor-crosshair') + ' touch-none select-none' : ''}`}
           onPointerDown={isSimplified ? undefined : handleTacticalStart}
           onPointerMove={isSimplified ? undefined : handleTacticalMove}
@@ -1735,7 +1834,7 @@ export default function LineupBuilder({
           style={{
             backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
               `repeating-linear-gradient(
-                to right,
+                ${attackDirection === 'up' || attackDirection === 'down' ? 'to right' : 'to bottom'},
                 ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'},
                 ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
                 ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
@@ -1747,7 +1846,17 @@ export default function LineupBuilder({
             backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
           }}
         >
-          {/* Tactical Drawing Layer */}
+          {/* Main Container that rotates for landscape */}
+          <div className="absolute inset-0 transition-transform duration-500 origin-center"
+            style={{
+              width: orientation === 'landscape' ? '66.66%' : '100%',
+              height: orientation === 'landscape' ? '150%' : '100%',
+              left: orientation === 'landscape' ? '16.67%' : '0',
+              top: orientation === 'landscape' ? '-25%' : '0',
+              transform: getPitchRotation()
+            }}
+          >
+            {/* Tactical Drawing Layer */}
           {(isMaximized || isSimplified) && (
             <svg 
               className="absolute inset-0 z-40 pointer-events-none"
@@ -1837,7 +1946,7 @@ export default function LineupBuilder({
               style={{
                 left: `${opp.x}%`,
                 top: `${opp.y}%`,
-                transform: 'translate(-50%, -50%)',
+                transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
                 width: `${playerScale * 50}px`,
                 height: `${playerScale * 50}px`,
               }}
@@ -1868,7 +1977,7 @@ export default function LineupBuilder({
               style={{
                 left: `${footballPos.x}%`,
                 top: `${footballPos.y}%`,
-                transform: 'translate(-50%, -50%)',
+                transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
               }}
             >
               <div className="w-6 h-6 sm:w-8 sm:h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-zinc-200">
@@ -1878,23 +1987,23 @@ export default function LineupBuilder({
           )}
 
           {/* Main Field Lines Inset */}
-          <div className="absolute top-[2%] bottom-[2%] left-[4%] right-[4%] border-2 border-white pointer-events-none" />
-          <div className="absolute top-1/2 left-[4%] right-[4%] h-[2px] bg-white" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[25%] aspect-square border-2 border-white rounded-full flex items-center justify-center">
-            <div className="w-1.5 h-1.5 bg-white rounded-full" />
+          <div className={`absolute top-[2%] bottom-[2%] left-[4%] right-[4%] border-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+          <div className={`absolute top-1/2 left-[4%] right-[4%] h-[2px] ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
+          <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[25%] aspect-square border-2 rounded-full flex items-center justify-center ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
           </div>
 
-          <div className="absolute top-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-b-2 border-x-2 border-white pointer-events-none">
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-b-2 border-x-2 border-white" />
-            <div className="absolute top-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
+          <div className={`absolute top-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-b-2 border-x-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`}>
+            <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-b-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+            <div className={`absolute top-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
           </div>
-          <div className="absolute top-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-b-2 border-white rounded-b-full overflow-hidden pointer-events-none" />
+          <div className={`absolute top-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-b-2 rounded-b-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
           
-          <div className="absolute bottom-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-t-2 border-x-2 border-white pointer-events-none">
-            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-t-2 border-x-2 border-white" />
-            <div className="absolute bottom-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white rounded-full" />
+          <div className={`absolute bottom-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-t-2 border-x-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`}>
+            <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-t-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+            <div className={`absolute bottom-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
           </div>
-          <div className="absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-t-2 border-white rounded-t-full overflow-hidden pointer-events-none" />
+          <div className={`absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-t-2 rounded-t-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
 
           {/* Draggable Players on Field */}
           <AnimatePresence>
@@ -1917,7 +2026,7 @@ export default function LineupBuilder({
                     left: `${displayX}%`,
                     top: `${displayY}%`,
                     touchAction: 'none',
-                    transform: 'translate(-50%, -50%)',
+                    transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
                     transition: (isDragging || isSimplified || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease'
                   }}
                   onPointerDown={isSimplified ? undefined : (e) => {
@@ -2077,7 +2186,7 @@ export default function LineupBuilder({
                   style={{
                     left: `${dragPos.x}%`,
                     top: `${dragPos.y}%`,
-                    transform: 'translate(-50%, -50%) scale(1.25)',
+                    transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(1.25)`,
                   }}
                 >
                   <div className="flex flex-col items-center">
@@ -2111,15 +2220,21 @@ export default function LineupBuilder({
               );
             })()}
           </AnimatePresence>
+          </div>
         </div>
 
         {/* Bench Area */}
         <div className="bench-container mb-0">
-          <div className={`p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
-            subs.length > 6 
-              ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
-              : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
-          }`}>
+          <Reorder.Group 
+            axis="x"
+            values={subs}
+            onReorder={handleReorderSubs}
+            className={`p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
+              subs.length > 6 
+                ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
+                : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
+            }`}
+          >
             {subs.length === 0 ? (
               <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
             ) : (
@@ -2127,17 +2242,12 @@ export default function LineupBuilder({
                 const sp = getSquadPlayer(p.playerId);
                 if (!sp) return null;
                 const isDragging = draggingId === p.id;
-                     return (
-                  <div 
+                
+                return (
+                  <Reorder.Item 
                     key={p.id} 
-                    className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-pointer'}`}
-                    onPointerDown={isSimplified ? undefined : (e) => {
-                      e.stopPropagation();
-                      if (!isEditMode) {
-                        setDraggingId(p.id);
-                        setDragPos({ x: 50, y: 92 }); 
-                      }
-                    }}
+                    value={p}
+                    className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-grab active:cursor-grabbing'}`}
                     onClick={isSimplified ? undefined : (e) => {
                       e.stopPropagation();
                       if (isEditMode) {
@@ -2153,49 +2263,49 @@ export default function LineupBuilder({
                       }
                     }}
                   >
-                      <div className="relative">
-                        <div 
-                          className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
-                          style={{
-                            width: `${3.5 * playerScale}rem`,
-                            height: `${3.5 * playerScale}rem`,
-                            display: showPhoto ? 'flex' : 'none'
-                          }}
-                        >
-                          {sp.photoUrl ? (
-                            <CachedImage 
-                              src={sp.photoUrl} 
-                              alt={sp.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
-                              <User size={24 * playerScale} />
-                            </div>
-                          )}
-                        </div>
-                        {sp.number && showNumber && (
-                          <div 
-                            className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
-                            style={{
-                              width: `${1.5 * playerScale}rem`,
-                              height: `${1.5 * playerScale}rem`,
-                              fontSize: `${0.6 * playerScale}rem`,
-                              bottom: showPhoto ? 0 : 'auto',
-                              right: showPhoto ? 0 : 'auto',
-                              top: !showPhoto ? '50%' : 'auto',
-                              left: !showPhoto ? '50%' : 'auto',
-                              transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                              position: showPhoto ? 'absolute' : 'relative',
-                              zIndex: 10
-                            }}
-                          >
-                            {sp.number}
+                    <div className="relative">
+                      <div 
+                        className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
+                        style={{
+                          width: `${3.5 * playerScale}rem`,
+                          height: `${3.5 * playerScale}rem`,
+                          display: showPhoto ? 'flex' : 'none'
+                        }}
+                      >
+                        {sp.photoUrl ? (
+                          <CachedImage 
+                            src={sp.photoUrl} 
+                            alt={sp.name} 
+                            className="w-full h-full object-cover" 
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                            <User size={24 * playerScale} />
                           </div>
                         )}
                       </div>
+                      {sp.number && showNumber && (
+                        <div 
+                          className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
+                          style={{
+                            width: `${1.5 * playerScale}rem`,
+                            height: `${1.5 * playerScale}rem`,
+                            fontSize: `${0.6 * playerScale}rem`,
+                            bottom: showPhoto ? 0 : 'auto',
+                            right: showPhoto ? 0 : 'auto',
+                            top: !showPhoto ? '50%' : 'auto',
+                            left: !showPhoto ? '50%' : 'auto',
+                            transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                            position: showPhoto ? 'absolute' : 'relative',
+                            zIndex: 10
+                          }}
+                        >
+                          {sp.number}
+                        </div>
+                      )}
+                    </div>
                     <div 
                       className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
                       style={{
@@ -2207,18 +2317,21 @@ export default function LineupBuilder({
                         <div key={i} className="truncate">{part}</div>
                       ))}
                     </div>
-                  </div>
+                  </Reorder.Item>
                 );
               })
             )}
-          </div>
+          </Reorder.Group>
         </div>
       </div>
     );
   };
 
   return (
-    <div className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-2xl pt-2 sm:pt-4 pb-32'}`}>
+    <div 
+      className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-[1600px] pt-2 sm:pt-4 pb-32'}`}
+      style={!isMaximized && previewZoom !== 1 ? { transform: `scale(${previewZoom})`, transformOrigin: 'top center' } : undefined}
+    >
       {isMaximized && (
         <>
           <div className="fixed top-3 right-3 z-[100] flex items-center gap-2">
@@ -2228,6 +2341,22 @@ export default function LineupBuilder({
               title={isControlsVisible ? "Dölj verktyg" : "Visa verktyg"}
             >
               {isControlsVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            <button
+              onClick={() => {
+                const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+                setOrientation(newOrientation);
+                if (newOrientation === 'landscape') {
+                  setAttackDirection('right');
+                } else {
+                  setAttackDirection('up');
+                }
+                setHasUnsavedChanges(true);
+              }}
+              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
+              title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
+            >
+              {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
             </button>
             <button
               onClick={() => setIsMaximized(false)}
@@ -2352,7 +2481,7 @@ export default function LineupBuilder({
                       <Minus size={14} />
                     </button>
                     <div className="flex flex-col items-center min-w-10">
-                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Skala</span>
+                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Spelare</span>
                       <span className="text-[10px] font-black text-zinc-900 dark:text-white leading-none">{Math.round(playerScale * 100)}%</span>
                     </div>
                     <button 
@@ -2533,7 +2662,7 @@ export default function LineupBuilder({
       )}
 
       <div className="w-full overflow-hidden rounded-3xl">
-        <div className="transition-transform origin-top" style={{ transform: isMaximized ? `scale(${fullScreenZoom})` : (previewZoom !== 1 ? `scale(${previewZoom})` : 'none'), transformOrigin: 'top center' }}>
+        <div className="transition-transform origin-top" style={{ transform: isMaximized ? `scale(${fullScreenZoom})` : 'none', transformOrigin: 'top center' }}>
           {renderLineupContent(false)}
         </div>
       </div>
@@ -2616,6 +2745,26 @@ export default function LineupBuilder({
                 <Redo2 size={20} />
               </button>
               <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1 shrink-0" />
+              <button
+                onClick={() => {
+                  const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+                  setOrientation(newOrientation);
+                  if (newOrientation === 'landscape') {
+                    setAttackDirection('right');
+                  } else {
+                    setAttackDirection('up');
+                  }
+                  setHasUnsavedChanges(true);
+                }}
+                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
+                  orientation === 'landscape' 
+                    ? 'bg-indigo-600 text-white border-indigo-500' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
+                }`}
+                title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
+              >
+                {orientation === 'landscape' ? <Smartphone size={20} /> : <Monitor size={20} />}
+              </button>
               <button
                 onClick={() => setShowPreview(true)}
                 className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
@@ -2763,7 +2912,18 @@ export default function LineupBuilder({
                     <div className="flex items-center gap-2">
                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Zoom Gränssnitt</span>
                     </div>
-                    <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(previewZoom * 100)}%</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(previewZoom * 100)}%</span>
+                      {previewZoom !== 1 && (
+                        <button 
+                          onClick={() => setPreviewZoom(1)}
+                          className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors text-zinc-400 hover:text-indigo-600"
+                          title="Återställ zoom"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <input 
                     type="range" 
@@ -2781,7 +2941,21 @@ export default function LineupBuilder({
                     <div className="flex items-center gap-2">
                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Spelarstorlek</span>
                     </div>
-                    <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(playerScale * 100)}%</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(playerScale * 100)}%</span>
+                      {playerScale !== 1 && (
+                        <button 
+                          onClick={() => {
+                            setPlayerScale(1);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors text-zinc-400 hover:text-indigo-600"
+                          title="Återställ spelarstorlek"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <input 
                     type="range" 
@@ -2909,6 +3083,10 @@ export default function LineupBuilder({
                     setNameDisplayMode('full');
                     setHasUnsavedChanges(true);
                   }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Hela</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('initials');
+                    setHasUnsavedChanges(true);
+                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Initialer</button>
                 </div>
               </div>
 
@@ -2945,7 +3123,7 @@ export default function LineupBuilder({
                   <button onClick={() => {
                     setPitchType('classic');
                     setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ränder</button>
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Grön Ränder</button>
                   <button onClick={() => {
                     setPitchType('blue-stripes');
                     setHasUnsavedChanges(true);
@@ -2966,6 +3144,43 @@ export default function LineupBuilder({
                     setPitchType('solid-blue');
                     setHasUnsavedChanges(true);
                   }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Blå</button>
+                  <button onClick={() => {
+                    setPitchType('solid-white');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-white' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Vit</button>
+                  <button onClick={() => {
+                    setPitchType('solid-black');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-black' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Svart</button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Anfallsriktning</span>
+                <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                  {orientation === 'vertical' ? (
+                    <>
+                      <button onClick={() => {
+                        setAttackDirection('up');
+                        setHasUnsavedChanges(true);
+                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'up' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Uppåt</button>
+                      <button onClick={() => {
+                        setAttackDirection('down');
+                        setHasUnsavedChanges(true);
+                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'down' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Nedåt</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => {
+                        setAttackDirection('left');
+                        setHasUnsavedChanges(true);
+                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'left' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Vänster</button>
+                      <button onClick={() => {
+                        setAttackDirection('right');
+                        setHasUnsavedChanges(true);
+                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'right' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Höger</button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -3010,6 +3225,7 @@ export default function LineupBuilder({
                   toggleArchive={toggleArchive}
                   onCopyLineup={onCopyLineup}
                   onDeleteLineup={onDeleteLineup}
+                  onEditTitle={openTitleEditForLineup}
                 />
               ))
             )}
@@ -3058,6 +3274,13 @@ export default function LineupBuilder({
                           </div>
 
                           <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
+                              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-950/20 rounded-lg transition-all"
+                              title="Redigera rubriker"
+                            >
+                              <Pencil size={16} />
+                            </button>
                             <button
                               onClick={(e) => toggleArchive(e, l.id)}
                               className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
@@ -3182,7 +3405,10 @@ export default function LineupBuilder({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4"
-            onClick={() => setIsEditingTitle(false)}
+            onClick={() => {
+              setIsEditingTitle(false);
+              setEditingLineupId(null);
+            }}
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
@@ -3225,17 +3451,36 @@ export default function LineupBuilder({
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setIsEditingTitle(false)}
+                  onClick={() => {
+                    setIsEditingTitle(false);
+                    setEditingLineupId(null);
+                  }}
                   className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-bold rounded-2xl active:scale-95 transition-all"
                 >
                   Avbryt
                 </button>
                 <button
                   onClick={() => {
-                    setLineupName(tempTitle);
-                    setTeamName(tempTeamName);
-                    setHasUnsavedChanges(true);
-                    handleSave();
+                    const idToUpdate = editingLineupId || lineup?.id;
+                    if (!idToUpdate) return;
+
+                    if (idToUpdate === lineup?.id) {
+                      setLineupName(tempTitle);
+                      setTeamName(tempTeamName);
+                      setHasUnsavedChanges(true);
+                      handleSave(); // Just closes modal
+                    } else {
+                      const target = lineups.find(x => x.id === idToUpdate);
+                      if (target) {
+                        onUpdateLineup({
+                          ...target,
+                          matchTitle: tempTitle,
+                          teamName: tempTeamName
+                        });
+                      }
+                      setIsEditingTitle(false);
+                      setEditingLineupId(null);
+                    }
                   }}
                   className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
                 >
@@ -4172,7 +4417,18 @@ export default function LineupBuilder({
                   <div className="flex flex-col items-center gap-2 w-full max-w-xs mt-2">
                     <div className="flex justify-between w-full px-1">
                       <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Zoom</span>
-                      <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(previewZoom * 100)}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(previewZoom * 100)}%</span>
+                        {previewZoom !== 1 && (
+                          <button 
+                            onClick={() => setPreviewZoom(1)}
+                            className="p-1 hover:bg-white/10 rounded-md transition-colors text-zinc-500 hover:text-white"
+                            title="Återställ zoom"
+                          >
+                            <RotateCcw size={10} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <input 
                       type="range" 
@@ -4188,7 +4444,21 @@ export default function LineupBuilder({
                   <div className="flex flex-col items-center gap-2 w-full max-w-xs mb-2">
                     <div className="flex justify-between w-full px-1">
                       <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Spelarstorlek</span>
-                      <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(playerScale * 100)}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-md">{Math.round(playerScale * 100)}%</span>
+                        {playerScale !== 1 && (
+                          <button 
+                            onClick={() => {
+                              setPlayerScale(1);
+                              setHasUnsavedChanges(true);
+                            }}
+                            className="p-1 hover:bg-white/10 rounded-md transition-colors text-zinc-500 hover:text-white"
+                            title="Återställ spelarstorlek"
+                          >
+                            <RotateCcw size={10} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <input 
                       type="range" 
