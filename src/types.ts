@@ -47,6 +47,7 @@ export interface Lineup {
   tacticalBoard?: {
     drawings: any[];
     footballPos: { x: number, y: number } | null;
+    footballScale?: number;
     opponents: { id: string, x: number, y: number }[];
     showOpponents: boolean;
     opponentColor?: string;

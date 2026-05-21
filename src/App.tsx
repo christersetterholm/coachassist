@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Home as HomeIcon, Plus, UserPlus, X, Check, Sun, Moon, Timer as TimerIcon, Edit2, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Users, LayoutDashboard, Calendar, Share2, Lock, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Home as HomeIcon, Plus, UserPlus, X, Check, Sun, Moon, Timer as TimerIcon, Edit2, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Users, LayoutDashboard, Calendar, Share2, Lock, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, CloudOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant, TrainingSession, TrainingSettings, CoachData } from './types';
 import { auth, signInWithGoogle, db } from './lib/firebase';
@@ -45,6 +45,17 @@ const INITIAL_DATA: CoachData = {
     defaultStartTime: '18:00',
     defaultDuration: 90
   }
+};
+
+const isQuotaError = (error: any): boolean => {
+  if (!error) return false;
+  const errMsg = (error.message || String(error)).toLowerCase();
+  return (
+    error.code === 'resource-exhausted' ||
+    errMsg.includes('quota') ||
+    errMsg.includes('exhausted') ||
+    errMsg.includes('billing')
+  );
 };
 
 export default function App() {
@@ -110,10 +121,13 @@ export default function App() {
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
   const syncUserIdRef = useRef<string | null>(null);
   const lastCloudDataRef = useRef<CoachData | null>(null);
   const notifiedMomentsRef = useRef<Set<string>>(new Set());
+  const lastSharedLeaderboardsRef = useRef<Record<string, string>>({});
 
   // Notification Scheduler for Training Moments
   useEffect(() => {
@@ -266,7 +280,7 @@ export default function App() {
       localStorage.setItem('pinned_formations', JSON.stringify(pinnedFormationIds));
       localStorage.setItem('last_local_sync_at', Date.now().toString());
     }
-  }, [squad, exercises, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, isAuthReady, isInitialSyncDone]);
 
   // Clear data on user change
   useEffect(() => {
@@ -307,6 +321,11 @@ export default function App() {
       let isFirstPull = true;
 
       const unsubscribe = onSnapshot(docRef, (snapshot) => {
+        // Skip processing local pending writes to avoid double-triggers/loops
+        if (snapshot.metadata.hasPendingWrites) {
+          return;
+        }
+
         if (!snapshot.exists()) {
           console.log("App: Cloud is empty.");
           if (isFirstPull) {
@@ -338,7 +357,8 @@ export default function App() {
                 adminUrl: savedAdminUrl || '',
                 seriesUrl: savedSeriesUrl || '',
                 customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
-                pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3']
+                pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
+                trainingSettings: localStorage.getItem('training_settings') ? JSON.parse(localStorage.getItem('training_settings')!) : INITIAL_DATA.trainingSettings
               };
               setData(newState);
               setSessionActionCount(1); // Force a push of this migrated data
@@ -351,6 +371,59 @@ export default function App() {
         }
 
         const cloudData = snapshot.data();
+        
+        // Robust Offline Recovery:
+        // Check if our local data in localStorage is newer than what is in cloud state.
+        // If local is newer, we prioritize our local progress and schedule a push to cloud.
+        const localSyncAtStr = localStorage.getItem('last_local_sync_at');
+        const localSyncAt = localSyncAtStr ? parseInt(localSyncAtStr, 10) : 0;
+        const cloudSyncAt = cloudData.updatedAt || 0;
+        const isOfflineDataNewer = isFirstPull && localSyncAt > (cloudSyncAt + 2000);
+
+        if (isOfflineDataNewer) {
+          console.log("App: Offline recovery triggered. Local state in localStorage is newer than Cloud state by " + (localSyncAt - cloudSyncAt) + "ms.");
+          const savedSquad = localStorage.getItem('football_squad');
+          if (savedSquad && JSON.parse(savedSquad).length > 0) {
+            const savedExercises = localStorage.getItem('football_exercises');
+            const savedSessions = localStorage.getItem('football_sessions');
+            const savedLineups = localStorage.getItem('football_lineups');
+            const savedActiveLineupId = localStorage.getItem('active_lineup_id');
+            const savedPeriods = localStorage.getItem('football_periods');
+            const savedCurrentPeriodId = localStorage.getItem('current_period_id');
+            const savedActiveExerciseId = localStorage.getItem('active_exercise_id');
+            const savedTeamUrl = localStorage.getItem('team_url');
+            const savedAdminUrl = localStorage.getItem('admin_url');
+            const savedSeriesUrl = localStorage.getItem('series_url');
+
+            const localState: CoachData = {
+              squad: JSON.parse(savedSquad),
+              exercises: savedExercises ? JSON.parse(savedExercises) : [],
+              sessions: savedSessions ? JSON.parse(savedSessions) : [],
+              lineups: savedLineups ? JSON.parse(savedLineups) : [],
+              activeLineupId: savedActiveLineupId || null,
+              periods: savedPeriods ? JSON.parse(savedPeriods) : [],
+              currentPeriodId: savedCurrentPeriodId || null,
+              activeExerciseId: savedActiveExerciseId || null,
+              teamUrl: savedTeamUrl || '',
+              adminUrl: savedAdminUrl || '',
+              seriesUrl: savedSeriesUrl || '',
+              customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
+              pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
+              trainingSettings: localStorage.getItem('training_settings') ? JSON.parse(localStorage.getItem('training_settings')!) : INITIAL_DATA.trainingSettings
+            };
+
+            setData(localState);
+            lastCloudDataRef.current = cloudData as CoachData;
+            setSessionActionCount(1); // Force a push of this newer local progress to cloud
+            syncUserIdRef.current = user.uid;
+            
+            if (isFirstPull) {
+              setIsInitialSyncDone(true);
+              isFirstPull = false;
+            }
+            return;
+          }
+        }
         
         // Skip if we caused this update
         if (cloudData.lastUpdatedBy === sessionIdRef.current) {
@@ -378,7 +451,8 @@ export default function App() {
           adminUrl: cloudData.adminUrl || '',
           seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
-          pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']
+          pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
+          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings
         };
 
         setData(newState);
@@ -396,6 +470,9 @@ export default function App() {
         }
       }, (error) => {
         console.error("App: Cloud sync error:", error);
+        if (isQuotaError(error)) {
+          setIsQuotaExceeded(true);
+        }
       });
 
       return () => unsubscribe();
@@ -404,20 +481,21 @@ export default function App() {
 
   // Push Local Actions to Cloud
   useEffect(() => {
-    if (user && isAuthReady && isInitialSyncDone && sessionActionCount > 0) {
+    if (user && isAuthReady && isInitialSyncDone && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
       // Security: verify current data actually belongs to this user
       if (syncUserIdRef.current !== user.uid) return;
       
       const syncData = async () => {
-        if (syncUserIdRef.current !== user.uid) return;
+        if (syncUserIdRef.current !== user.uid || isSyncing) return;
         
-        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds };
+        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
+        const capturedActionCount = sessionActionCount;
         
         // Skip if current state matches what we last saw from cloud
         if (lastCloudDataRef.current) {
           if (JSON.stringify(currentState) === JSON.stringify(lastCloudDataRef.current)) {
             console.log("App: Local state matches cloud, skipping push.");
-            setSessionActionCount(0);
+            setSessionActionCount(prev => Math.max(0, prev - capturedActionCount));
             return;
           }
         }
@@ -435,22 +513,30 @@ export default function App() {
           setLastSyncedAt(now);
           lastSyncedAtRef.current = now;
           lastCloudDataRef.current = currentState;
-          setSessionActionCount(0); // Reset after successful push
+          setSessionActionCount(prev => Math.max(0, prev - capturedActionCount)); // Safely subtract only the actions we just successfully wrote
+          setIsQuotaExceeded(false); // Reset quota status on success
+          setSyncError(null); // Reset sync error on success
         } catch (error) {
           console.error("App: Cloud push failed", error);
+          if (isQuotaError(error)) {
+            setIsQuotaExceeded(true);
+            setSessionActionCount(0); // Halt retries
+          } else {
+            setSyncError((error as Error)?.message || 'Okänt synkfel');
+          }
         } finally {
           setIsSyncing(false);
         }
       };
       
-      const timeout = setTimeout(syncData, 1000); // 1s sync debounce (reduced from 3s)
+      const timeout = setTimeout(syncData, 5000); // 5000ms debounce delay to group rapid changes and save Firestore quota
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, isSyncing, isQuotaExceeded]);
 
   // Sync shared leaderboards globally
   useEffect(() => {
-    if (user && isAuthReady && isInitialSyncDone) {
+    if (user && isAuthReady && isInitialSyncDone && !isQuotaExceeded) {
       const syncSharedLeaderboards = async () => {
         const sharedPeriods = periods.filter(p => p.shareId);
         if (sharedPeriods.length === 0) return;
@@ -471,7 +557,9 @@ export default function App() {
         try {
           for (const period of sharedPeriods) {
             const stats = calculateLeaderboard(squad, exercises, period.id, periods);
-            const dataToUpdate = {
+            
+            // Build comparison data WITHOUT the updated timestamp to determine if real data changed
+            const comparisonData = {
               id: period.shareId,
               name: period.name,
               standings: stats.map((p: any) => ({
@@ -481,23 +569,39 @@ export default function App() {
                 points: p.totalPoints,
                 history: p.history || []
               })),
-              updatedAt: Date.now(),
               startDate: period.startDate || null,
               endDate: period.endDate || null,
               coachUid: user.uid,
               activeExerciseId: activeExerciseId
             };
+
+            const comparisonString = JSON.stringify(comparisonData);
+            if (lastSharedLeaderboardsRef.current[period.shareId!] === comparisonString) {
+              console.log(`App: Skipping leaderboard sync for ${period.name} (has not changed)`);
+              continue;
+            }
+
+            console.log(`App: Leaderboard data changed for ${period.name}, writing to shared_leaderboards`);
+            const dataToUpdate = {
+              ...comparisonData,
+              updatedAt: Date.now()
+            };
+            
             await setDoc(doc(db, 'shared_leaderboards', period.shareId!), dataToUpdate, { merge: true });
+            lastSharedLeaderboardsRef.current[period.shareId!] = comparisonString;
           }
         } catch (error) {
           console.error("Error syncing shared leaderboards globally:", error);
+          if (isQuotaError(error)) {
+            setIsQuotaExceeded(true);
+          }
         }
       };
 
       const timeoutId = setTimeout(syncSharedLeaderboards, 3000);
       return () => clearTimeout(timeoutId);
     }
-  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone, isQuotaExceeded]);
 
   // Update localStorage for guests
   useEffect(() => {
@@ -1224,7 +1328,7 @@ export default function App() {
     if (!user) return;
     setIsSyncing(true);
     const now = Date.now();
-    const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, pinnedFormationIds };
+    const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
     try {
       await setDoc(doc(db, 'users', user.uid, 'config', 'state'), {
         ...currentState,
@@ -1234,16 +1338,23 @@ export default function App() {
       setLastSyncedAt(now);
       lastSyncedAtRef.current = now;
       syncUserIdRef.current = user.uid;
+      lastCloudDataRef.current = currentState; // Mark as synchronized locally to avoid double push
       setSessionActionCount(0); // Reset after manual push
       localStorage.setItem('last_local_sync_at', now.toString());
+      setIsQuotaExceeded(false); // Reset status on success
+      setSyncError(null); // Reset sync error on success
       console.log("App: Manual push successful");
     } catch (error: any) {
       console.error("App: Manual push failed", error);
-      let errorMsg = "Synkronisering misslyckades.";
-      if (error?.code === 'permission-denied') errorMsg += " Behörighet saknas.";
-      else if (error?.code === 'resource-exhausted') errorMsg += " Kvoten (quota) är överskriden.";
-      else errorMsg += " Kontrollera din internetanslutning.";
-      alert(errorMsg);
+      if (isQuotaError(error)) {
+        setIsQuotaExceeded(true);
+      } else {
+        setSyncError(error?.message || "Synkronisering misslyckades");
+        let errorMsg = "Synkronisering misslyckades.";
+        if (error?.code === 'permission-denied') errorMsg += " Behörighet saknas.";
+        else errorMsg += " Kontrollera din internetanslutning.";
+        alert(errorMsg);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -1269,7 +1380,8 @@ export default function App() {
           adminUrl: cloudData.adminUrl || '',
           seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
-          pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']
+          pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
+          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings
         };
         setData(newState);
         syncUserIdRef.current = user.uid;
@@ -1337,7 +1449,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 ${(view === 'exercise' || view === 'teampage') ? 'h-[100dvh] overflow-hidden select-none' : 'min-h-screen pb-24'}`}>
+    <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 h-[100dvh] overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
       {view !== 'lineup' && (
         <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 ${view === 'exercise' ? 'sticky top-0' : ''}`}>
           <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -1528,7 +1640,25 @@ export default function App() {
         </header>
       )}
 
-      <main className={`flex-1 flex flex-col ${view === 'exercise' ? 'min-h-0 overflow-hidden' : ''}`}>
+      {isQuotaExceeded && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-center text-xs font-bold leading-normal flex items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-amber-600">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>
+            Synkning tillfälligt pausad (molndatabasens dygnsgräns är nådd). Allt sparas säkert lokalt i webbläsaren!
+          </span>
+          <button
+            onClick={() => {
+              setIsQuotaExceeded(false);
+              setSessionActionCount(1); // Triggers backup push
+            }}
+            className="underline hover:no-underline font-black cursor-pointer ml-2 px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded transition-all"
+          >
+            Försök igen
+          </button>
+        </div>
+      )}
+
+      <main className={`flex-1 flex flex-col min-h-0 ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : 'overflow-y-auto pb-24 sm:pb-28'}`}>
         <AnimatePresence mode="wait">
           {view === 'training' && (
             sharedLeaderboardId ? (
@@ -1793,10 +1923,22 @@ export default function App() {
                         Dina data sparas automatiskt i molnet och synkas mellan alla dina enheter där du är inloggad.
                       </p>
                       <div className="mt-4 space-y-3">
-                        <div className="flex items-center gap-2 text-green-600 dark:text-green-400 text-xs font-bold">
-                          <ShieldCheck size={14} />
-                          <span>Aktiv och säker</span>
-                        </div>
+                        {isQuotaExceeded ? (
+                          <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400">
+                            <div className="flex items-center gap-2 text-xs font-bold">
+                              <AlertTriangle size={14} className="shrink-0" />
+                              <span>Gratis dygnsgräns nådd i molnet</span>
+                            </div>
+                            <p className="text-[10px] font-medium leading-normal animate-pulse">
+                              Datan sparas fortfarande helt säkert lokalt i webbläsaren. Synkronisering återupptas automatiskt när molnet återställs.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-green-600 dark:text-green-400 text-xs font-bold">
+                            <ShieldCheck size={14} />
+                            <span>Aktiv och säker</span>
+                          </div>
+                        )}
                         {isSyncing && (
                           <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 text-xs font-bold animate-pulse">
                             <RotateCcw size={14} className="animate-spin" />
@@ -1946,6 +2088,10 @@ export default function App() {
                 setSessionActionCount(prev => prev + 1);
               }}
               user={user}
+              isSyncing={isSyncing}
+              sessionActionCount={sessionActionCount}
+              isQuotaExceeded={isQuotaExceeded}
+              syncError={syncError}
             />
           )}
 

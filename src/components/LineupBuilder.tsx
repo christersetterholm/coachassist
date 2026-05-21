@@ -6,7 +6,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, MousePointer2, Route } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, MousePointer2, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -33,6 +33,10 @@ interface LineupBuilderProps {
   onDeleteCustomFormation?: (id: string) => void;
   onTogglePinFormation?: (id: string) => void;
   user: FirebaseUser | null;
+  isSyncing?: boolean;
+  sessionActionCount?: number;
+  isQuotaExceeded?: boolean;
+  syncError?: string | null;
 }
 
 const EXPORT_FORMATS = {
@@ -146,8 +150,35 @@ export default function LineupBuilder({
   onSaveCustomFormation,
   onDeleteCustomFormation,
   onTogglePinFormation,
-  user 
+  user,
+  isSyncing = false,
+  sessionActionCount = 0,
+  isQuotaExceeded = false,
+  syncError = null
 }: LineupBuilderProps) {
+  const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
+    <svg 
+      width={size} 
+      height={size} 
+      viewBox="0 0 100 100" 
+      xmlns="http://www.w3.org/2000/svg" 
+      className={className}
+    >
+      <circle cx="50" cy="50" r="48" fill="white" stroke="currentColor" strokeWidth="2" />
+      <path d="M50 35L62 43L58 57L42 57L38 43Z" fill="currentColor" />
+      <path d="M50 5L60 13L57 25L43 25L40 13Z" fill="currentColor" transform="rotate(0, 50, 50)" />
+      <path d="M50 5L60 13L57 25L43 25L40 13Z" fill="currentColor" transform="rotate(72, 50, 50)" />
+      <path d="M50 5L60 13L57 25L43 25L40 13Z" fill="currentColor" transform="rotate(144, 50, 50)" />
+      <path d="M50 5L60 13L57 25L43 25L40 13Z" fill="currentColor" transform="rotate(216, 50, 50)" />
+      <path d="M50 5L60 13L57 25L43 25L40 13Z" fill="currentColor" transform="rotate(288, 50, 50)" />
+      <line x1="50" y1="35" x2="50" y2="25" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="62" y1="43" x2="72" y2="38" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="58" y1="57" x2="68" y2="68" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="42" y1="57" x2="32" y2="68" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="38" y1="43" x2="28" y2="38" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+
   const [lineupName, setLineupName] = useState(lineup?.matchTitle || '');
   const [teamName, setTeamName] = useState(lineup?.teamName || '');
   const [players, setPlayers] = useState<LineupPlayer[]>(lineup?.players || []);
@@ -220,27 +251,71 @@ export default function LineupBuilder({
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isControlsVisible, setIsControlsVisible] = useState(true);
+  const [isDrawingsVisible, setIsDrawingsVisible] = useState(true);
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
+  const [showSavedLineups, setShowSavedLineups] = useState(true);
+  const [showBenchMaximized, setShowBenchMaximized] = useState(false);
+  const [showZoomMenu, setShowZoomMenu] = useState(false);
   const dragControls = useDragControls();
   const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
   const sessionToken = useMemo(() => Math.random().toString(36).substring(7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move'>('pen');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle'>('pen');
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [circleStart, setCircleStart] = useState<{ x: number, y: number } | null>(null);
+  const [pitchAspectRatio, setPitchAspectRatio] = useState(1);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [isTransforming, setIsTransforming] = useState<'move' | 'resize' | null>(null);
+  const [transformStart, setTransformStart] = useState<{ x: number, y: number, initialPoints: any[] } | null>(null);
 
-  // Sync tactical players if empty when opening rittavla
+  // Track pitch aspect ratio for circular drawings
   useEffect(() => {
-    if (isMaximized && tacticalPlayers.length === 0 && players.length > 0) {
-      setTacticalPlayers(JSON.parse(JSON.stringify(players)));
-    }
-  }, [isMaximized, players.length]);
+    if (!fieldRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setPitchAspectRatio(entry.contentRect.width / entry.contentRect.height);
+      }
+    });
+    observer.observe(fieldRef.current);
+    return () => observer.disconnect();
+  }, [isMaximized, orientation]);
+
+  // Sync tactical players with main players (handles additions/deletions/subs while keeping custom positioning on the drawing board)
+  useEffect(() => {
+    setTacticalPlayers(prevTactical => {
+      const prevList = prevTactical || [];
+      const prevMap = new Map<string, LineupPlayer>(prevList.map(p => [p.id, p]));
+      
+      const updatedTactical = players.map(p => {
+        const match = prevMap.get(p.id);
+        if (match) {
+          // Preserve the custom tactical coordinates and state, but update other details from main state
+          return {
+            ...p,
+            x: match.x,
+            y: match.y,
+            isHolding: match.isHolding,
+          };
+        }
+        return { ...p };
+      });
+
+      if (JSON.stringify(prevList) !== JSON.stringify(updatedTactical)) {
+        return updatedTactical;
+      }
+      return prevList;
+    });
+  }, [isMaximized, players]);
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
+  const [tacticalFontSize, setTacticalFontSize] = useState<number>(16);
   const [tacticalColor, setTacticalColor] = useState('#ffffff');
   const [footballPos, setFootballPos] = useState<{ x: number, y: number } | null>(lineup?.tacticalBoard?.footballPos || null);
+  const [footballScale, setFootballScale] = useState<number>(lineup?.tacticalBoard?.footballScale || 1);
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
   const [opponentColor, setOpponentColor] = useState(lineup?.tacticalBoard?.opponentColor || '#ef4444');
@@ -326,20 +401,20 @@ export default function LineupBuilder({
   const [showOpponentFormationModal, setShowOpponentFormationModal] = useState(false);
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
+  const [tempFormation, setTempFormation] = useState<any | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lineupHistories, setLineupHistories] = useState<Record<string, any[]>>({});
   const [lineupFutures, setLineupFutures] = useState<Record<string, any[]>>({});
   const isRestoringHistory = useRef(false);
   const skipHistoryRemoteUpdate = useRef(false);
-
   // Sync local state when lineup prop changes (remote updates)
   useEffect(() => {
     if (!lineup) return;
     
-    // We only want to sync if we don't have unsaved changes, 
-    // or if the lineup ID changed (switching lineup)
     const isNewId = lineup.id !== currentIdRef.current;
     
+    // We only want to force a full state reset if it's a new ID
+    // or if we DON'T have unsaved changes (meaning we are following the cloud truth).
     if (isNewId || !hasUnsavedChanges) {
       setLineupName(lineup.matchTitle || '');
       setTeamName(lineup.teamName || '');
@@ -362,6 +437,7 @@ export default function LineupBuilder({
       setOpponentMedia(lineup.notes?.opponent?.media || []);
       setTacticalDrawings(lineup.tacticalBoard?.drawings || []);
       setFootballPos(lineup.tacticalBoard?.footballPos || null);
+      setFootballScale(lineup.tacticalBoard?.footballScale || 1);
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
@@ -370,69 +446,24 @@ export default function LineupBuilder({
       // Deduplicate players by ID
       const deduplicatedPlayers = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
       setPlayers(deduplicatedPlayers);
-
-      // If we switch lineup and there are no tactical players, we bisa initialize them or keep them empty.
-      // But usually we want them to stay if we switch back.
       
       currentIdRef.current = lineup.id;
       setHasUnsavedChanges(false);
     }
-  }, [lineup]);
+  }, [lineup]);;
 
   const currentId = lineup?.id || 'temp';
   const currentIdRef = useRef(currentId);
   const history = lineupHistories[currentId] || [];
   const future = lineupFutures[currentId] || [];
 
-  // Sync history with Firestore if user is logged in
+  // Undo/Redo history (lineupHistories / lineupFutures) is kept strictly local in the component's state
+  // to avoid sending massive history lists of snapshots back and forth to Firestore on every interactive change.
+  // This completely resolves the "Quota exceeded" errors and keeps the tactical board extremely fast.
   useEffect(() => {
-    if (!user || !lineup?.id) return;
-
-    const historyDocRef = doc(db, 'users', user.uid, 'lineup_history', lineup.id);
-    
-    const unsubscribe = onSnapshot(historyDocRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.lastUpdatedBy === sessionToken) {
-          // We caused this update, skip
-          return;
-        }
-        
-        // Block local updates while we apply remote history
-        skipHistoryRemoteUpdate.current = true;
-        if (data.history) setLineupHistories(prev => ({ ...prev, [lineup.id]: data.history }));
-        if (data.future) setLineupFutures(prev => ({ ...prev, [lineup.id]: data.future }));
-        setTimeout(() => { skipHistoryRemoteUpdate.current = false; }, 100);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [user, lineup?.id, sessionToken]);
-
-  // Push history to Cloud (debounced)
-  useEffect(() => {
-    if (!user || !lineup?.id || skipHistoryRemoteUpdate.current) return;
-    
-    const h = lineupHistories[lineup.id] || [];
-    const f = lineupFutures[lineup.id] || [];
-
-    const syncHistory = async () => {
-      const historyDocRef = doc(db, 'users', user.uid, 'lineup_history', lineup.id);
-      try {
-        await setDoc(historyDocRef, {
-          history: h,
-          future: f,
-          updatedAt: Date.now(),
-          lastUpdatedBy: sessionToken
-        }, { merge: true });
-      } catch (e) {
-        console.error("Error syncing history to cloud:", e);
-      }
-    };
-
-    const timeout = setTimeout(syncHistory, 3000); // 3s debounce for history sync (increased from 2s)
-    return () => clearTimeout(timeout);
-  }, [lineupHistories, lineupFutures, user, lineup?.id]);
+    // History sync to Firestore is removed to preserve quota.
+    // The undo/redo stacks remain fully functional in-memory.
+  }, [lineupHistories, lineupFutures]);
 
   const pushHistory = useCallback(() => {
     setLineupHistories(prev => {
@@ -454,6 +485,7 @@ export default function LineupBuilder({
         players: JSON.parse(JSON.stringify(players)),
         tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
         footballPos: footballPos ? { ...footballPos } : null,
+        footballScale: footballScale || 1,
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
         showOpponents,
@@ -486,6 +518,7 @@ export default function LineupBuilder({
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballScale: footballScale || 1,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
@@ -510,11 +543,10 @@ export default function LineupBuilder({
     setShowNumber(last.showNumber);
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
-    setOrientation(last.orientation || 'vertical');
-    setAttackDirection(last.attackDirection || (last.orientation === 'landscape' ? 'left' : 'up'));
     setPlayers(JSON.parse(JSON.stringify(last.players)));
     setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players)));
     setFootballPos(last.footballPos ? { ...last.footballPos } : null);
+    setFootballScale(last.footballScale || 1);
     setOpponents(JSON.parse(JSON.stringify(last.opponents)));
     setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings)));
     setShowOpponents(last.showOpponents);
@@ -526,7 +558,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -548,6 +580,7 @@ export default function LineupBuilder({
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballScale: footballScale || 1,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
@@ -572,11 +605,10 @@ export default function LineupBuilder({
     setShowNumber(next.showNumber);
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
-    setOrientation(next.orientation || 'vertical');
-    setAttackDirection(next.attackDirection || (next.orientation === 'landscape' ? 'left' : 'up'));
     setPlayers(JSON.parse(JSON.stringify(next.players)));
     setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players)));
     setFootballPos(next.footballPos ? { ...next.footballPos } : null);
+    setFootballScale(next.footballScale || 1);
     setOpponents(JSON.parse(JSON.stringify(next.opponents)));
     setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings)));
     setShowOpponents(next.showOpponents);
@@ -588,7 +620,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) return;
@@ -599,11 +631,33 @@ export default function LineupBuilder({
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Tactical Board Handlers
+  const transformCoords = (clientX: number, clientY: number) => {
+    if (!fieldRef.current) return { x: 0, y: 0 };
+    const rect = fieldRef.current.getBoundingClientRect();
+    let x = ((clientX - rect.left) / rect.width) * 100;
+    let y = ((clientY - rect.top) / rect.height) * 100;
+
+    // Map screen relative coordinates back to pitch coordinates based on rotation
+    if (orientation === 'landscape') {
+      const vx = x;
+      const vy = y;
+      if (attackDirection === 'right') {
+        x = vy;
+        y = 100 - vx;
+      } else { // left
+        x = 100 - vy;
+        y = vx;
+      }
+    } else if (attackDirection === 'down') {
+      x = 100 - x;
+      y = 100 - y;
+    }
+    return { x, y };
+  };
+
   const handleTacticalStart = (e: React.PointerEvent) => {
     if (!isMaximized || !fieldRef.current) return;
-    const rect = fieldRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const { x, y } = transformCoords(e.clientX, e.clientY);
 
     if (tacticalTool === 'ball') {
       pushHistory();
@@ -613,6 +667,50 @@ export default function LineupBuilder({
     }
 
     if (tacticalTool === 'move') {
+      // First check if we're clicking a resize handle of a selected drawing
+      if (selectedDrawingId) {
+        const draw = tacticalDrawings.find(d => d.id === selectedDrawingId);
+        if (draw) {
+          if (draw.type === 'circle') {
+             const rx = Math.hypot(draw.points[0].x - draw.points[1].x, draw.points[0].y - draw.points[1].y);
+             const ry = rx * pitchAspectRatio;
+             // Resize handle check (near the bottom right of the "bounding box" or edge)
+             const dist = Math.hypot(draw.points[1].x - x, draw.points[1].y - y);
+             if (dist < 5) {
+               setIsTransforming('resize');
+               setTransformStart({ x, y, initialPoints: [...draw.points] });
+               return;
+             }
+          } else if (draw.type === 'text') {
+             // For text, resizing is harder to define without a box, maybe just move for now
+             // Or allow resizing via a handle near the text
+          }
+        }
+      }
+
+      // Detect if we're clicking a drawing to select or move
+      const clickedDrawing = tacticalDrawings.slice().reverse().find(d => {
+        if (d.type === 'text') {
+           return Math.hypot(d.points[0].x - x, d.points[0].y - y) < 8;
+        }
+        if (d.type === 'circle') {
+           const radiusSVG = Math.sqrt(Math.pow(d.points[0].x - d.points[1].x, 2) + Math.pow((d.points[0].y - d.points[1].y) / pitchAspectRatio, 2));
+           const dx = x - d.points[0].x;
+           const dy = (y - d.points[0].y) / pitchAspectRatio;
+           const distToCenter = Math.sqrt(dx*dx + dy*dy);
+           return distToCenter < radiusSVG * 1.1; // Clicked inside or near edge
+        }
+        return d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 5);
+      });
+
+      if (clickedDrawing) {
+        pushHistory();
+        setSelectedDrawingId(clickedDrawing.id);
+        setIsTransforming('move');
+        setTransformStart({ x, y, initialPoints: JSON.parse(JSON.stringify(clickedDrawing.points)) });
+      } else {
+        setSelectedDrawingId(null);
+      }
       return;
     }
 
@@ -627,14 +725,44 @@ export default function LineupBuilder({
       pushHistory();
       // Find and remove clicked drawing
       setTacticalDrawings(prev => prev.filter(d => {
+        if (d.type === 'text') {
+           // Click near center of text
+           return Math.hypot(d.points[0].x - x, d.points[0].y - y) > 5;
+        }
+        if (d.type === 'circle') {
+           // Click near edge of circle, accounting for aspect ratio distortion
+           const rx = Math.hypot(d.points[0].x - d.points[1].x, d.points[0].y - d.points[1].y);
+           const ry = rx * pitchAspectRatio;
+           const dx = x - d.points[0].x;
+           const dy = y - d.points[0].y;
+           const dist = Math.sqrt(Math.pow(dx / rx, 2) + Math.pow(dy / ry, 2));
+           return Math.abs(dist - 1) > 0.2; // Tolerance for clicking on the line
+        }
         return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 3);
       }));
       // Also remove opponents if clicked near
       setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 5));
       // Remove football if clicked near
-      if (footballPos && Math.hypot(footballPos.x - x, footballPos.y - y) < 5) {
+      if (footballPos && Math.hypot(footballPos.x - x, footballPos.y - y) < 5 * footballScale) {
         setFootballPos(null);
       }
+      setHasUnsavedChanges(true);
+      return;
+    }
+
+    if (tacticalTool === 'text') {
+      pushHistory();
+      const id = Math.random().toString(36).substr(2, 9);
+      const newText = {
+        id,
+        type: 'text',
+        points: [{ x, y }],
+        text: '',
+        color: tacticalColor,
+        fontSize: tacticalFontSize
+      };
+      setTacticalDrawings(prev => [...prev, newText]);
+      setEditingTextId(id);
       setHasUnsavedChanges(true);
       return;
     }
@@ -659,25 +787,7 @@ export default function LineupBuilder({
 
   const handleTacticalMove = (e: React.PointerEvent) => {
     if (!isMaximized || !fieldRef.current) return;
-    const rect = fieldRef.current.getBoundingClientRect();
-    let x = ((e.clientX - rect.left) / rect.width) * 100;
-    let y = ((e.clientY - rect.top) / rect.height) * 100;
-
-    // Map screen relative coordinates back to pitch coordinates based on rotation
-    if (orientation === 'landscape') {
-      const vx = x;
-      const vy = y;
-      if (attackDirection === 'right') {
-        x = vy;
-        y = 100 - vx;
-      } else { // left
-        x = 100 - vy;
-        y = vx;
-      }
-    } else if (attackDirection === 'down') {
-      x = 100 - x;
-      y = 100 - y;
-    }
+    const { x, y } = transformCoords(e.clientX, e.clientY);
 
     if (draggingBall) {
       setFootballPos({ x, y });
@@ -689,11 +799,39 @@ export default function LineupBuilder({
       return;
     }
 
+    if (isTransforming && selectedDrawingId && transformStart) {
+      const dx = x - transformStart.x;
+      const dy = y - transformStart.y;
+
+      setTacticalDrawings(prev => prev.map(d => {
+        if (d.id !== selectedDrawingId) return d;
+
+        if (isTransforming === 'move') {
+          const newPoints = transformStart.initialPoints.map((p: any) => ({
+            x: p.x + dx,
+            y: p.y + dy
+          }));
+          return { ...d, points: newPoints };
+        } else if (isTransforming === 'resize') {
+          if (d.type === 'circle') {
+             // For circle, points[0] is center, points[1] defines radius
+             // Here we just update points[1]
+             const newPoints = [d.points[0], { x, y }];
+             return { ...d, points: newPoints };
+          }
+           // Add other resize logic as needed
+        }
+        return d;
+      }));
+      setHasUnsavedChanges(true);
+      return;
+    }
+
     if (!isDrawing) return;
 
     if (tacticalTool === 'pen' || tacticalTool === 'freehand-arrow') {
       setCurrentPath(prev => [...prev, { x, y }]);
-    } else if (tacticalTool === 'arrow') {
+    } else if (tacticalTool === 'arrow' || tacticalTool === 'circle') {
       setCurrentPath(prev => [prev[0], { x, y }]);
     }
   };
@@ -702,14 +840,16 @@ export default function LineupBuilder({
     if (isDrawing) {
       if (currentPath.length > 1) {
         pushHistory();
+        const newId = Math.random().toString(36).substr(2, 9);
         setTacticalDrawings(prev => [...prev, {
-          id: Math.random().toString(36).substr(2, 9),
+          id: newId,
           type: tacticalTool,
           points: currentPath,
           color: tacticalColor,
           lineType: tacticalLineType,
           lineWidth: tacticalLineWidth
         }]);
+        setSelectedDrawingId(newId);
         setHasUnsavedChanges(true);
       }
       setIsDrawing(false);
@@ -718,6 +858,8 @@ export default function LineupBuilder({
     if (draggingBall || draggingOpponentId) {
       setHasUnsavedChanges(true);
     }
+    setIsTransforming(null);
+    setTransformStart(null);
     clearLongPress();
     setDraggingBall(false);
     setDraggingOpponentId(null);
@@ -785,6 +927,8 @@ export default function LineupBuilder({
       #export-target-actual .football-pitch {
         width: ${isSmallTarget ? target.width - 20 : target.width - 80}px !important;
         max-width: ${isSmallTarget ? target.width - 20 : target.width - 80}px !important;
+        height: auto !important;
+        max-height: none !important;
         margin-bottom: ${isSmallTarget ? '15px' : '30px'} !important;
         flex-shrink: 0 !important;
       }
@@ -1228,10 +1372,9 @@ export default function LineupBuilder({
     
     // Create current state object for comparison
     const currentState: Lineup = {
-      id: lineup.id,
+      ...lineup,
       matchTitle: lineupName,
       teamName,
-      date: lineup.date, // Use prop date for comparison
       players,
       playerScale,
       nameTagStyle,
@@ -1242,6 +1385,8 @@ export default function LineupBuilder({
       showNumber,
       teamLogoUrl,
       pitchType,
+      orientation,
+      attackDirection,
       formation: currentFormation,
       notes: {
         team: { text: teamNotes, media: teamMedia },
@@ -1250,6 +1395,7 @@ export default function LineupBuilder({
       tacticalBoard: {
         drawings: tacticalDrawings,
         footballPos,
+        footballScale,
         opponents,
         showOpponents,
         opponentColor,
@@ -1259,24 +1405,26 @@ export default function LineupBuilder({
 
     // Skip if current local state is identical to what we got from props
     // This prevents the "ping-pong" effect when receiving remote updates
-    const remoteTactical = lineup.tacticalBoard || {
-      drawings: [],
-      footballPos: null,
-      opponents: [],
-      showOpponents: true,
-      opponentColor: '#ef4444'
+    const remoteTactical = {
+      drawings: lineup.tacticalBoard?.drawings || [],
+      footballPos: lineup.tacticalBoard?.footballPos || null,
+      footballScale: lineup.tacticalBoard?.footballScale || 1,
+      opponents: lineup.tacticalBoard?.opponents || [],
+      showOpponents: lineup.tacticalBoard?.showOpponents ?? true,
+      opponentColor: lineup.tacticalBoard?.opponentColor || '#ef4444',
+      players: lineup.tacticalBoard?.players || []
     };
 
-      const remoteNotes = {
-        team: { 
-          text: lineup.notes?.team?.text || '', 
-          media: lineup.notes?.team?.media || [] 
-        },
-        opponent: { 
-          text: lineup.notes?.opponent?.text || '', 
-          media: lineup.notes?.opponent?.media || [] 
-        }
-      };
+    const remoteNotes = {
+      team: { 
+        text: lineup.notes?.team?.text || '', 
+        media: lineup.notes?.team?.media || [] 
+      },
+      opponent: { 
+        text: lineup.notes?.opponent?.text || '', 
+        media: lineup.notes?.opponent?.media || [] 
+      }
+    };
 
     const isDifferent = 
       lineup.matchTitle !== lineupName ||
@@ -1290,23 +1438,44 @@ export default function LineupBuilder({
       lineup.showNumber !== showNumber ||
       lineup.teamLogoUrl !== teamLogoUrl ||
       lineup.formation !== currentFormation ||
-      pitchType !== lineup.pitchType ||
-      JSON.stringify(lineup.players) !== JSON.stringify(players) ||
-      JSON.stringify(lineup.tacticalBoard?.players || []) !== JSON.stringify(tacticalPlayers) ||
+      pitchType !== (lineup.pitchType || 'classic') ||
+      orientation !== (lineup.orientation || 'vertical') ||
+      attackDirection !== (lineup.attackDirection || (orientation === 'landscape' ? 'left' : 'up')) ||
+      JSON.stringify(lineup.players || []) !== JSON.stringify(players) ||
       JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard) ||
       JSON.stringify(remoteNotes) !== JSON.stringify(currentState.notes);
 
-    if (!isDifferent || !hasUnsavedChanges) return;
+    // If local state matches props exactly, we handle the unsaved changes state
+    if (!isDifferent) {
+      if (hasUnsavedChanges) {
+        console.log("LineupBuilder: Local matches prop, clearing unsaved changes flag.");
+        setHasUnsavedChanges(false);
+      }
+      return;
+    }
+
+    if (!hasUnsavedChanges) return;
 
     const timeout = setTimeout(() => {
       onUpdateLineup({
         ...currentState,
         date: Date.now() // Set new date only when actually pushing changes
       });
-    }, 800); // Reduced from 1500ms to 800ms for snappier feel
+      setHasUnsavedChanges(false);
+    }, 400); // Reduced from 800ms to 400ms for extra fast auto-save
     
-    return () => clearTimeout(timeout);
-  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id]);
+    return () => {
+      clearTimeout(timeout);
+      // Flush changes ONLY when unmounting or switching to a different lineup
+      // to avoid triggering parent updates on every single micro-render/drag step.
+      if (hasUnsavedChanges && (!lineup || lineup.id !== currentIdRef.current)) {
+        onUpdateLineup({
+          ...currentState,
+          date: Date.now()
+        });
+      }
+    };
+  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -1457,7 +1626,7 @@ export default function LineupBuilder({
     // Sort outfield for consistency (optional)
     outfield.sort((a, b) => {
       const yDiff = b.y - a.y;
-      if (Math.abs(yDiff) > 5) return yDiff;
+      if (Math.abs(yDiff) > 10) return yDiff;
       return a.x - b.x;
     });
 
@@ -1714,6 +1883,36 @@ export default function LineupBuilder({
   };
 
   const getSquadPlayer = (id: string) => squad.find(s => s.id === id);
+
+  const calculateBestSpawnPosition = useCallback((currentPlayers: LineupPlayer[]) => {
+    const corners = [
+      { x: 8, y: 8 },    // Top Left
+      { x: 92, y: 8 },   // Top Right
+      { x: 8, y: 92 },   // Bottom Left
+      { x: 92, y: 92 }   // Bottom Right
+    ];
+    let bestCorner = corners[0];
+    let maxMinDistance = -1;
+
+    corners.forEach(corner => {
+      let minDistance = 999999;
+      currentPlayers.forEach(p => {
+        if (!p.isSubstitute) {
+          const dx = p.x - corner.x;
+          const dy = p.y - corner.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDistance) {
+            minDistance = dist;
+          }
+        }
+      });
+      if (minDistance > maxMinDistance) {
+        maxMinDistance = minDistance;
+        bestCorner = corner;
+      }
+    });
+    return bestCorner;
+  }, []);
   
   const activePlayers = isMaximized ? tacticalPlayers : players;
   const setActivePlayers = isMaximized ? setTacticalPlayers : setPlayers;
@@ -1743,18 +1942,28 @@ export default function LineupBuilder({
     const isExportMode = !isSimplified && !isMaximized;
     const isMobileExport = (exportFormat === 'mobile' || (exportFormat === 'responsive' && typeof window !== 'undefined' && window.innerWidth < 640)) && isSimplified;
 
+    // Standard international dimension ratios (105 x 68 meters)
+    const pitchRatioW = 68;
+    const pitchRatioH = 105;
+    const R = pitchRatioH / pitchRatioW; // 1.5441176470588236
+    const invR = pitchRatioW / pitchRatioH; // 0.6476190476190476
+
     return (
       <div 
         ref={customRef || (isSimplified ? null : exportRef)} 
         id={isSimplified ? "preview-container" : "export-container"} 
-        className={`bg-white dark:bg-zinc-900 rounded-3xl p-3 sm:p-6 shadow-xl border border-zinc-100 dark:border-zinc-800 transition-all ${
-          isSimplified ? 'w-full mx-auto' : (isMaximized ? 'max-w-5xl mx-auto dark:bg-zinc-950 border-none shadow-none !p-0' : 'mb-4')
-        }`}
+        className={`rounded-3xl transition-all ${
+          isMaximized 
+            ? 'max-w-none bg-transparent border-none shadow-none !p-0 w-full' 
+            : `bg-white dark:bg-zinc-900 shadow-xl border border-zinc-100 dark:border-zinc-800 p-3 sm:p-6 mb-4 ${
+                orientation === 'landscape' ? 'max-w-[1380px]' : 'max-w-3xl'
+              } mx-auto w-full`
+        } ${isSimplified ? 'w-full mx-auto' : ''}`}
         style={isSimplified ? { maxWidth: exportFormat === 'responsive' ? '100%' : exportFormat === 'mobile' ? '390px' : exportFormat === 'tablet' ? '600px' : '1000px' } : undefined}
       >
         {/* Export Header - Title & Team Logo */}
         {(!isMaximized || isSimplified) && (
-          <div className="flex items-center justify-between mb-6 px-2">
+          <div className="flex items-center justify-between mb-2 md:mb-3 px-2">
             <div 
               className={`flex flex-col ${isSimplified ? '' : 'cursor-pointer group/title'}`}
               onClick={isSimplified ? undefined : () => {
@@ -1770,6 +1979,46 @@ export default function LineupBuilder({
                 <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 tracking-tight leading-none flex items-center gap-2 overflow-hidden">
                   <span className="whitespace-nowrap">{lineupName || 'Namnlös Match'}</span>
                   {!isSimplified && <Edit2 size={12} className="opacity-0 group-hover/title:opacity-100 transition-opacity" />}
+                  {!isSimplified && (
+                    <AnimatePresence>
+                      {(hasUnsavedChanges || (user && sessionActionCount > 0) || isSyncing || isQuotaExceeded || syncError) && (
+                        <motion.span
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          className={`inline-flex items-center gap-1.5 ml-2 text-[9px] font-black px-1.5 py-0.5 rounded-full border transition-all duration-300 ${
+                            isQuotaExceeded || syncError
+                              ? 'bg-red-500/10 text-red-500 border-red-500/20 dark:bg-red-500/20'
+                              : isSyncing
+                                ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/30 dark:bg-indigo-500/20 animate-pulse'
+                                : 'bg-amber-500/10 text-amber-500 border-amber-500/20 dark:bg-amber-500/20'
+                          }`}
+                        >
+                          {isQuotaExceeded ? (
+                            <>
+                              <CloudOff size={10} className="shrink-0" />
+                              <span>Molngräns nådd</span>
+                            </>
+                          ) : syncError ? (
+                            <>
+                              <CloudOff size={10} className="shrink-0 text-red-500" />
+                              <span className="max-w-[120px] truncate" title={syncError}>Synkfel</span>
+                            </>
+                          ) : isSyncing ? (
+                            <>
+                              <RefreshCw size={10} className="animate-spin shrink-0" />
+                              <span>Synkar...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Cloud size={10} className="shrink-0 animate-pulse text-amber-500" />
+                              <span>Väntar...</span>
+                            </>
+                          )}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  )}
                 </h2>
               </div>
               {(!lineupName && !teamName && !isSimplified) && (
@@ -1813,51 +2062,292 @@ export default function LineupBuilder({
           </div>
         )}
 
-        {/* The Football Pitch */}
-        <div 
-          ref={isSimplified ? null : fieldRef}
-          className={`football-pitch relative rounded-[40px] overflow-hidden border-[8px] border-white/20 shadow-2xl mb-6 transition-all duration-500 ${
-            orientation === 'landscape' ? 'aspect-[3/2] w-full max-w-4xl mx-auto' : 'aspect-[2/3]'
-          } ${
-            (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') 
-              ? 'bg-sky-300' 
-              : pitchType === 'solid-white' 
+        {/* Pitch and Bench Side-by-Side Flex Layout */}
+        <div className={`flex ${!isMaximized && orientation === 'landscape' ? 'flex-col lg:flex-row gap-6 items-center lg:items-center justify-center' : 'flex-col'} w-full`}>
+          {/* Pitch Container */}
+          <div className={`${!isMaximized && orientation === 'landscape' ? 'flex-1 min-w-0 max-w-full flex justify-center' : 'w-full'} relative`}>
+          {/* Tactical Toolbar for selected drawing */}
+          {(selectedDrawingId || tacticalTool === 'eraser') && !isTransforming && (
+            <div 
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onPointerMove={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="absolute -top-16 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md px-4 py-2 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 duration-300 pointer-events-auto"
+            >
+              {tacticalTool === 'eraser' ? (
+                <>
+                  <span className="text-xs font-bold text-orange-600 dark:text-orange-400 flex items-center gap-1.5 px-1 bg-orange-50/50 dark:bg-orange-950/20 py-1.5 rounded-xl border border-orange-200/50 dark:border-orange-900/40">
+                    <Eraser size={14} className="text-orange-600" /> Suddgummi aktivt. Klicka på fribandslinjer, pilar eller figurer för att sudda.
+                  </span>
+                  <button 
+                    onClick={() => {
+                      pushHistory();
+                      setTacticalDrawings([]);
+                      setFootballPos(null);
+                      setOpponents([]);
+                      setSelectedDrawingId(null);
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100 transition-colors ml-2"
+                    title="Radera allt ritat"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSelectedDrawingId(null);
+                      setTacticalTool('pen');
+                    }}
+                    className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors ml-1"
+                    title="Avsluta suddgummi"
+                  >
+                    <X size={18} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5 border-r border-zinc-200 dark:border-zinc-800 pr-2 mr-1">
+                    {['#ffffff', '#ef4444', '#facc15'].map(color => (
+                      <button 
+                        key={color}
+                        onClick={() => {
+                          setTacticalColor(color);
+                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, color } : d));
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${
+                          tacticalDrawings.find(d => d.id === selectedDrawingId)?.color === color ? 'border-indigo-500 scale-110' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+
+                  {tacticalDrawings.find(d => d.id === selectedDrawingId)?.type === 'text' && (
+                    <button 
+                      onClick={() => setEditingTextId(selectedDrawingId)}
+                      className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors"
+                      title="Redigera text"
+                    >
+                      <Type size={18} />
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-1 px-2 border-r border-zinc-200 dark:border-zinc-800 mr-1 text-zinc-400">
+                    <button 
+                      onClick={() => {
+                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
+                        if (!drawing) return;
+                        if (drawing.type === 'text') {
+                          const newSize = Math.max(8, (drawing.fontSize || 16) - 2);
+                          setTacticalFontSize(newSize);
+                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, fontSize: newSize } : d));
+                        } else {
+                          const newWidth = Math.max(0.2, (drawing.lineWidth || 0.8) - 0.1);
+                          setTacticalLineWidth(newWidth);
+                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, lineWidth: newWidth } : d));
+                        }
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="p-1 hover:text-zinc-600"
+                    >
+                       <Minus size={16} />
+                    </button>
+                    <span className="text-[10px] font-black w-6 text-center text-zinc-800 dark:text-zinc-200">
+                      {(() => {
+                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
+                        if (!drawing) return '0.8';
+                        return drawing.type === 'text' 
+                          ? Math.round(drawing.fontSize || 16) 
+                          : (drawing.lineWidth || 0.8).toFixed(1);
+                      })()}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
+                        if (!drawing) return;
+                        if (drawing.type === 'text') {
+                          const newSize = Math.min(48, (drawing.fontSize || 16) + 2);
+                          setTacticalFontSize(newSize);
+                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, fontSize: newSize } : d));
+                        } else {
+                          const newWidth = Math.min(5, (drawing.lineWidth || 0.8) + 0.1);
+                          setTacticalLineWidth(newWidth);
+                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, lineWidth: newWidth } : d));
+                        }
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="p-1 hover:text-zinc-600"
+                    >
+                       <Plus size={16} />
+                    </button>
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      setTacticalTool('eraser');
+                    }}
+                    className={`p-2 rounded-xl transition-colors ${
+                      tacticalTool === 'eraser'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-orange-50 dark:bg-orange-900/10 text-orange-650 dark:text-orange-400 hover:bg-orange-100'
+                    }`}
+                    title="Aktivera suddgummi (Sudd-läge)"
+                  >
+                    <Eraser size={18} />
+                  </button>
+
+                  <button 
+                    onClick={() => {
+                      pushHistory();
+                      clearTactical();
+                      setSelectedDrawingId(null);
+                    }}
+                    className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100 transition-colors"
+                    title="Radera allt ritat"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      setSelectedDrawingId(null);
+                    }}
+                    className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors ml-1"
+                    title="Stäng inställningar"
+                  >
+                    <X size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* The Football Pitch */}
+          <div 
+            className={`football-pitch relative rounded-[32px] sm:rounded-[40px] overflow-hidden border-[6px] sm:border-[8px] border-white/20 shadow-2xl transition-all duration-500 ${isMaximized ? 'mb-0' : 'mb-6'} ${
+              orientation === 'landscape'
+                ? `aspect-[105/68] w-auto h-auto mx-auto ${
+                    isMaximized 
+                      ? 'max-h-[calc(100vh-24px)] max-w-full lg:max-w-none' 
+                      : ''
+                  }`
+                : `aspect-[68/105] w-auto h-auto mx-auto ${
+                    isMaximized 
+                      ? 'max-h-[calc(100vh-24px)] max-w-full' 
+                      : ''
+                  }`
+            } ${
+              (pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass') 
+                ? 'bg-sky-300' 
+                : pitchType === 'solid-white' 
                 ? 'bg-white' 
                 : pitchType === 'solid-black' 
                   ? 'bg-zinc-950' 
                   : 'bg-[#8dc343]'
-          } ${(isMaximized && !isSimplified) ? (tacticalTool === 'move' ? 'cursor-default' : 'cursor-crosshair') + ' touch-none select-none' : ''}`}
-          onPointerDown={isSimplified ? undefined : handleTacticalStart}
-          onPointerMove={isSimplified ? undefined : handleTacticalMove}
-          onPointerUp={isSimplified ? undefined : handleTacticalEnd}
-          onPointerLeave={isSimplified ? undefined : handleTacticalEnd}
-          style={{
-            backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
-              `repeating-linear-gradient(
-                ${attackDirection === 'up' || attackDirection === 'down' ? 'to right' : 'to bottom'},
-                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'},
-                ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
-                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
-                ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
-              )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
-            ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
-              `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
-            ) : 'none',
-            backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
-          }}
-        >
-          {/* Main Container that rotates for landscape */}
-          <div className="absolute inset-0 transition-transform duration-500 origin-center"
+            } ${(isMaximized && !isSimplified) ? (tacticalTool === 'move' ? 'cursor-default' : 'cursor-crosshair') + ' touch-none select-none' : ''}`}
+            onPointerDown={isSimplified ? undefined : handleTacticalStart}
+            onPointerMove={isSimplified ? undefined : handleTacticalMove}
+            onPointerUp={isSimplified ? undefined : handleTacticalEnd}
+            onPointerLeave={isSimplified ? undefined : handleTacticalEnd}
             style={{
-              width: orientation === 'landscape' ? '66.66%' : '100%',
-              height: orientation === 'landscape' ? '150%' : '100%',
-              left: orientation === 'landscape' ? '16.67%' : '0',
-              top: orientation === 'landscape' ? '-25%' : '0',
+              width: isMaximized 
+                ? (orientation === 'landscape' ? `min(98vw, calc((100vh - 24px) * ${R}))` : `min(98vw, calc((100vh - 24px) * ${invR}))`)
+                : (orientation === 'landscape' ? `min(96vw, 1024px, calc((100vh - 220px) * ${R}))` : `min(92vw, 560px, calc((100vh - 300px) * ${invR}))`),
+              height: isMaximized
+                ? (orientation === 'landscape' ? `min(calc(98vw / ${R}), calc(100vh - 24px))` : `min(calc(98vw / ${invR}), calc(100vh - 24px))`)
+                : (orientation === 'landscape' ? `min(calc(96vw / ${R}), 663px, calc(100vh - 220px))` : `min(calc(92vw / ${invR}), 864px, calc(100vh - 300px))`),
+              aspectRatio: orientation === 'landscape' ? '105/68' : '68/105',
+              backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
+                `repeating-linear-gradient(
+                  ${attackDirection === 'up' || attackDirection === 'down' ? 'to right' : 'to bottom'},
+                  ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'},
+                  ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
+                  ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
+                  ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
+                )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
+              ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
+                `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
+              ) : 'none',
+              backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
+            }}
+          >
+
+          {/* Inline Text Editor - Outside rotating layer to keep it readable */}
+          {editingTextId && (
+            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/5 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm mx-auto animate-in zoom-in duration-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600">
+                    <Type size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase text-zinc-900 dark:text-white tracking-tight leading-none">Skriv på tavlan</h3>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase mt-1">Välj text och tryck på klar</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const d = tacticalDrawings.find(it => it.id === editingTextId);
+                      if (d && !d.text) {
+                        setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
+                      }
+                      setEditingTextId(null);
+                    }}
+                    className="ml-auto p-2 text-zinc-400 hover:text-zinc-600 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <input 
+                  autoFocus
+                  type="text"
+                  className="w-full px-5 py-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border-2 border-transparent focus:border-indigo-600 focus:ring-0 text-base font-bold transition-all"
+                  placeholder="Din text..."
+                  value={tacticalDrawings.find(d => d.id === editingTextId)?.text || ''}
+                  onChange={(e) => {
+                    setTacticalDrawings(prev => prev.map(d => d.id === editingTextId ? { ...d, text: e.target.value } : d));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setEditingTextId(null);
+                    if (e.key === 'Escape') setEditingTextId(null);
+                  }}
+                />
+                <div className="grid grid-cols-2 gap-3 mt-6">
+                  <button 
+                    onClick={() => {
+                      setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
+                      setEditingTextId(null);
+                    }}
+                    className="py-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
+                  >
+                    Rensa
+                  </button>
+                  <button 
+                    onClick={() => setEditingTextId(null)}
+                    className="py-4 rounded-2xl bg-indigo-600 text-white font-black uppercase text-[10px] tracking-widest shadow-lg shadow-indigo-600/20 active:scale-95 transition-all"
+                  >
+                    Spara
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Main Container that rotates for landscape */}
+          <div 
+            ref={isSimplified ? null : fieldRef}
+            className="absolute inset-0 transition-transform duration-500 origin-center"
+            style={{
+              width: orientation === 'landscape' ? `${(invR * 100).toFixed(6)}%` : '100%',
+              height: orientation === 'landscape' ? `${(R * 100).toFixed(6)}%` : '100%',
+              left: orientation === 'landscape' ? `${(((1 - invR) / 2) * 100).toFixed(6)}%` : '0',
+              top: orientation === 'landscape' ? `${(((1 - R) / 2) * 100).toFixed(6)}%` : '0',
               transform: getPitchRotation()
             }}
           >
             {/* Tactical Drawing Layer */}
-          {(isMaximized || isSimplified) && (
+          {(isMaximized || isSimplified) && isDrawingsVisible && (
             <svg 
               className="absolute inset-0 z-40 pointer-events-none"
               viewBox="0 0 100 100"
@@ -1873,7 +2363,31 @@ export default function LineupBuilder({
               {/* Previous Drawings */}
               {tacticalDrawings.map((draw) => (
                 <g key={draw.id}>
-                  {draw.type === 'pen' || draw.type === 'freehand-arrow' ? (
+                  {draw.type === 'circle' ? (
+                    <ellipse
+                      cx={draw.points[0].x}
+                      cy={draw.points[0].y}
+                      rx={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2))}
+                      ry={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
+                      fill="none"
+                      stroke={draw.color}
+                      strokeWidth={draw.lineWidth || 0.8}
+                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                    />
+                  ) : draw.type === 'text' ? (
+                    <text
+                      x={draw.points[0].x}
+                      y={draw.points[0].y}
+                      fill={draw.color}
+                      fontSize={draw.fontSize / 3}
+                      fontWeight="900"
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      style={{ transform: `rotate(${getCounterRotation()})`, transformOrigin: 'center', transformBox: 'fill-box' }}
+                    >
+                      {draw.text}
+                    </text>
+                  ) : draw.type === 'pen' || draw.type === 'freehand-arrow' ? (
                     <path
                       d={`M ${draw.points[0].x} ${draw.points[0].y} ${draw.points.slice(1).map((p: any) => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
@@ -1896,13 +2410,67 @@ export default function LineupBuilder({
                       markerEnd={`url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
                     />
                   )}
+                  
+                  {/* Selection Indicator */}
+                  {selectedDrawingId === draw.id && tacticalTool === 'move' && (
+                    <g className="pointer-events-none">
+                      {draw.type === 'circle' && (
+                        <>
+                          <ellipse
+                            cx={draw.points[0].x}
+                            cy={draw.points[0].y}
+                            rx={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) + 0.5}
+                            ry={(Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) + 0.5) * pitchAspectRatio}
+                            fill="none"
+                            stroke="#6366f1"
+                            strokeWidth="0.3"
+                            strokeDasharray="1,1"
+                          />
+                          {/* Resize Handle */}
+                          <circle 
+                             cx={draw.points[1].x}
+                             cy={draw.points[1].y}
+                             r="1.2"
+                             fill="white"
+                             stroke="#6366f1"
+                             strokeWidth="0.4"
+                             className="pointer-events-auto cursor-nwse-resize"
+                          />
+                        </>
+                      )}
+                      {draw.type === 'text' && (
+                        <rect 
+                           x={draw.points[0].x - 4}
+                           y={draw.points[0].y - 3}
+                           width="8"
+                           height="6"
+                           fill="none"
+                           stroke="#6366f1"
+                           strokeWidth="0.3"
+                           strokeDasharray="1,1"
+                           style={{ transform: `rotate(${getCounterRotation()})`, transformOrigin: `${draw.points[0].x}% ${draw.points[0].y}%` }}
+                        />
+                      )}
+                    </g>
+                  )}
                 </g>
               ))}
 
               {/* Current Drawing */}
               {!isSimplified && isDrawing && currentPath.length > 1 && (
                 <g>
-                   {tacticalTool === 'pen' || tacticalTool === 'freehand-arrow' ? (
+                   {tacticalTool === 'circle' ? (
+                     <ellipse
+                       cx={currentPath[0].x}
+                       cy={currentPath[0].y}
+                       rx={Math.sqrt(Math.pow(currentPath[0].x - currentPath[1].x, 2) + Math.pow((currentPath[0].y - currentPath[1].y) / pitchAspectRatio, 2))}
+                       ry={Math.sqrt(Math.pow(currentPath[0].x - currentPath[1].x, 2) + Math.pow((currentPath[0].y - currentPath[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
+                       fill="none"
+                       stroke={tacticalColor}
+                       strokeWidth={tacticalLineWidth}
+                       strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                     />
+                   ) : tacticalTool === 'pen' || tacticalTool === 'freehand-arrow' ? (
                     <path
                       d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
@@ -1931,7 +2499,7 @@ export default function LineupBuilder({
           )}
 
           {/* Opponents Layer */}
-          {(isMaximized || isSimplified) && showOpponents && opponents.map((opp) => (
+          {(isMaximized || isSimplified) && showOpponents && isDrawingsVisible && opponents.map((opp) => (
             <div 
               key={opp.id}
               className={`absolute z-40 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
@@ -1963,7 +2531,7 @@ export default function LineupBuilder({
           ))}
 
           {/* Football Icon */}
-          {(isMaximized || isSimplified) && footballPos && (
+          {(isMaximized || isSimplified) && footballPos && isDrawingsVisible && (
             <div 
               className={`absolute z-50 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
               onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball')}
@@ -1977,13 +2545,14 @@ export default function LineupBuilder({
               style={{
                 left: `${footballPos.x}%`,
                 top: `${footballPos.y}%`,
-                transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
+                transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(${footballScale})`,
               }}
             >
-              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-zinc-200">
-                <div className="w-full h-full rounded-full border-[3px] border-zinc-900 border-dashed" />
+              <div className="w-6 h-6 sm:w-8 sm:h-8 shadow-lg">
+                <SoccerBallIcon className="w-full h-full text-zinc-900" />
               </div>
             </div>
+
           )}
 
           {/* Main Field Lines Inset */}
@@ -2032,6 +2601,18 @@ export default function LineupBuilder({
                   onPointerDown={isSimplified ? undefined : (e) => {
                     e.stopPropagation();
                     if (!isEditMode) {
+                      if (p.isHolding) {
+                        // Tapping/dragging the holding player immediately clears the holding state (amber highlight)
+                        // so they become normally movable and stay exactly where placed.
+                        pushHistory();
+                        setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
+                          lp.id === p.id ? { ...lp, isHolding: false } : lp
+                        ));
+                        setHasUnsavedChanges(true);
+                      }
+
+                      // We completely removed the automatic onPointerDown swapping behavior
+                      // that was causing subs to jump on top of the goalkeeper when clicking other players.
                       pushHistory();
                       setDraggingId(p.id);
                       setDragPos({ x: p.x, y: p.y });
@@ -2222,125 +2803,233 @@ export default function LineupBuilder({
           </AnimatePresence>
           </div>
         </div>
+      </div>
 
         {/* Bench Area */}
-        <div className="bench-container mb-0">
-          <Reorder.Group 
-            axis="x"
-            values={subs}
-            onReorder={handleReorderSubs}
-            className={`p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
-              subs.length > 6 
-                ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
-                : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
-            }`}
-          >
-            {subs.length === 0 ? (
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
-            ) : (
-              subs.map(p => {
-                const sp = getSquadPlayer(p.playerId);
-                if (!sp) return null;
-                const isDragging = draggingId === p.id;
-                
-                return (
-                  <Reorder.Item 
-                    key={p.id} 
-                    value={p}
-                    className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-grab active:cursor-grabbing'}`}
-                    onClick={isSimplified ? undefined : (e) => {
-                      e.stopPropagation();
-                      if (isEditMode) {
-                        setSelectedForEdit(p.id)
-                      } else {
-                        // Quick add to holding area on pitch
-                        pushHistory();
-                        setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
-                          lp.id === p.id 
-                            ? { ...lp, isSubstitute: false, x: 50, y: 92, isHolding: true } 
-                            : { ...lp, isHolding: false } // Clear others
-                        ));
-                      }
-                    }}
-                  >
-                    <div className="relative">
-                      <div 
-                        className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
-                        style={{
-                          width: `${3.5 * playerScale}rem`,
-                          height: `${3.5 * playerScale}rem`,
-                          display: showPhoto ? 'flex' : 'none'
-                        }}
-                      >
-                        {sp.photoUrl ? (
-                          <CachedImage 
-                            src={sp.photoUrl} 
-                            alt={sp.name} 
-                            className="w-full h-full object-cover" 
-                            loading="lazy"
-                            decoding="async"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
-                            <User size={24 * playerScale} />
+        {!isMaximized && (
+          <div className={`bench-container mb-0 ${orientation === 'landscape' ? 'w-full lg:w-[320px] lg:shrink-0 lg:max-h-[85vh] lg:overflow-y-auto no-scrollbar' : 'w-full'}`}>
+            <Reorder.Group 
+              axis={orientation === 'landscape' ? "y" : "x"}
+              values={subs}
+              onReorder={handleReorderSubs}
+              className={`p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 transition-all ${
+                orientation === 'landscape'
+                  ? 'grid grid-cols-4 lg:grid-cols-3 gap-2 lg:gap-3 justify-center w-full'
+                  : subs.length > 6 
+                    ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
+                    : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
+              }`}
+            >
+              {subs.length === 0 ? (
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
+              ) : (
+                subs.map(p => {
+                  const sp = getSquadPlayer(p.playerId);
+                  if (!sp) return null;
+                  const isDragging = draggingId === p.id;
+                  
+                  return (
+                    <Reorder.Item 
+                      key={p.id} 
+                      value={p}
+                      className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-grab active:cursor-grabbing'}`}
+                      onClick={isSimplified ? undefined : (e) => {
+                        e.stopPropagation();
+                        if (isEditMode) {
+                          setSelectedForEdit(p.id)
+                        } else {
+                          // Quick add to holding area on pitch
+                          pushHistory();
+                          setActivePlayers((prev: LineupPlayer[]) => {
+                            // Any existing holding player gets deselected, but remains on the field!
+                            const nextState = prev.map(lp => {
+                              if (lp.id === p.id) {
+                                return lp; // Clicked player
+                              }
+                              if (lp.isHolding) {
+                                return { ...lp, isHolding: false };
+                              }
+                              return lp;
+                            });
+
+                            // Calculate best spawn corner based on current field starters
+                            const spawnPos = calculateBestSpawnPosition(nextState);
+
+                            return nextState.map(lp => {
+                              if (lp.id === p.id) {
+                                return { ...lp, isSubstitute: false, x: spawnPos.x, y: spawnPos.y, isHolding: true };
+                              }
+                              return lp;
+                            });
+                          });
+                          setHasUnsavedChanges(true);
+                        }
+                      }}
+                    >
+                      <div className="relative">
+                        <div 
+                          className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
+                          style={{
+                            width: `${3.5 * playerScale}rem`,
+                            height: `${3.5 * playerScale}rem`,
+                            display: showPhoto ? 'flex' : 'none'
+                          }}
+                        >
+                          {sp.photoUrl ? (
+                            <CachedImage 
+                              src={sp.photoUrl} 
+                              alt={sp.name} 
+                              className="w-full h-full object-cover" 
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                              <User size={24 * playerScale} />
+                            </div>
+                          )}
+                        </div>
+                        {sp.number && showNumber && (
+                          <div 
+                            className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
+                            style={{
+                              width: `${1.5 * playerScale}rem`,
+                              height: `${1.5 * playerScale}rem`,
+                              fontSize: `${0.6 * playerScale}rem`,
+                              bottom: showPhoto ? 0 : 'auto',
+                              right: showPhoto ? 0 : 'auto',
+                              top: !showPhoto ? '50%' : 'auto',
+                              left: !showPhoto ? '50%' : 'auto',
+                              transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                              position: showPhoto ? 'absolute' : 'relative',
+                              zIndex: 10
+                            }}
+                          >
+                            {sp.number}
                           </div>
                         )}
                       </div>
-                      {sp.number && showNumber && (
-                        <div 
-                          className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
-                          style={{
-                            width: `${1.5 * playerScale}rem`,
-                            height: `${1.5 * playerScale}rem`,
-                            fontSize: `${0.6 * playerScale}rem`,
-                            bottom: showPhoto ? 0 : 'auto',
-                            right: showPhoto ? 0 : 'auto',
-                            top: !showPhoto ? '50%' : 'auto',
-                            left: !showPhoto ? '50%' : 'auto',
-                            transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                            position: showPhoto ? 'absolute' : 'relative',
-                            zIndex: 10
-                          }}
-                        >
-                          {sp.number}
-                        </div>
-                      )}
-                    </div>
-                    <div 
-                      className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
-                      style={{
-                        fontSize: `${0.6 * playerScale}rem`,
-                        marginTop: `${0.4 * playerScale}rem`
-                      }}
-                    >
-                      {getVisibleName(sp.name).split(' ').map((part, i) => (
-                        <div key={i} className="truncate">{part}</div>
-                      ))}
-                    </div>
-                  </Reorder.Item>
-                );
-              })
-            )}
-          </Reorder.Group>
-        </div>
+                      <div 
+                        className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
+                        style={{
+                          fontSize: `${0.6 * playerScale}rem`,
+                          marginTop: `${0.4 * playerScale}rem`
+                        }}
+                      >
+                        {getVisibleName(sp.name).split(' ').map((part, i) => (
+                          <div key={i} className="truncate">{part}</div>
+                        ))}
+                      </div>
+                    </Reorder.Item>
+                  );
+                })
+              )}
+            </Reorder.Group>
+          </div>
+        )}
+        
+        </div> {/* Close main side-by-side Flex Layout */}
       </div>
     );
   };
 
   return (
     <div 
-      className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? `fixed inset-0 z-50 bg-zinc-950 p-4 sm:p-8 md:p-12 ${isDrawing || draggingBall || draggingId || draggingOpponentId ? 'overflow-hidden' : 'overflow-y-auto'}` : 'max-w-[1600px] pt-2 sm:pt-4 pb-32'}`}
-      style={!isMaximized && previewZoom !== 1 ? { transform: `scale(${previewZoom})`, transformOrigin: 'top center' } : undefined}
+      className={`mx-auto transition-all duration-500 w-full px-4 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 overflow-hidden flex flex-col items-center justify-center' : 'max-w-[1600px] pt-2 sm:pt-4 pb-32'}`}
+      style={!isMaximized && previewZoom !== 1 ? { zoom: previewZoom } : undefined}
     >
       {isMaximized && (
         <>
           <div className="fixed top-3 right-3 z-[100] flex items-center gap-2">
             <button
-              onClick={() => setIsControlsVisible(!isControlsVisible)}
-              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
-              title={isControlsVisible ? "Dölj verktyg" : "Visa verktyg"}
+              onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                isDrawingsVisible
+                  ? 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                  : 'bg-zinc-500/10 text-zinc-400 hover:bg-zinc-500/20 border-zinc-500/25'
+              }`}
+              title={isDrawingsVisible ? "Dölj ritat/placerat på planen" : "Visa ritat/placerat på planen"}
             >
-              {isControlsVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+              {isDrawingsVisible ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>
+            <button
+              onClick={() => setIsControlsVisible(!isControlsVisible)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                isControlsVisible 
+                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+              }`}
+              title={isControlsVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              onClick={() => setShowFormationModal(true)}
+              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
+              title="Välj formation / positioner"
+            >
+              <Layout size={16} />
+            </button>
+            <button
+              onClick={() => setShowNotesModal(true)}
+              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
+              title="Anteckningar"
+            >
+              <ClipboardList size={16} />
+            </button>
+            <button
+              onClick={() => {
+                const nextVal = !showSavedLineups;
+                setShowSavedLineups(nextVal);
+                if (nextVal) {
+                  setShowBenchMaximized(false);
+                  setShowZoomMenu(false);
+                }
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                showSavedLineups 
+                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+              }`}
+              title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
+            >
+              <FolderOpen size={16} />
+            </button>
+            <button
+              onClick={() => {
+                const nextVal = !showBenchMaximized;
+                setShowBenchMaximized(nextVal);
+                if (nextVal) {
+                  setShowSavedLineups(false);
+                  setShowZoomMenu(false);
+                }
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                showBenchMaximized 
+                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+              }`}
+              title={showBenchMaximized ? "Dölj avbätare" : "Visa avbytare (Bänk)"}
+            >
+              <Shirt size={16} />
+            </button>
+            <button
+              onClick={() => {
+                const nextVal = !showZoomMenu;
+                setShowZoomMenu(nextVal);
+                if (nextVal) {
+                  setShowSavedLineups(false);
+                  setShowBenchMaximized(false);
+                }
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                showZoomMenu 
+                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+              }`}
+              title={showZoomMenu ? "Dölj zoominställningar" : "Visa zoominställningar"}
+            >
+              <ZoomIn size={16} />
             </button>
             <button
               onClick={() => {
@@ -2353,19 +3042,316 @@ export default function LineupBuilder({
                 }
                 setHasUnsavedChanges(true);
               }}
-              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
+              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
               title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
             >
               {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
             </button>
             <button
-              onClick={() => setIsMaximized(false)}
-              className="w-8 h-8 bg-zinc-900/40 backdrop-blur-md text-white/50 rounded-lg flex items-center justify-center shadow-xl border border-white/10 hover:bg-zinc-900/80 hover:text-white transition-all group"
+              onClick={() => {
+                setIsMaximized(false);
+                setShowSavedLineups(true);
+                setShowBenchMaximized(false);
+                setShowZoomMenu(false);
+              }}
+              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
               title="Lämna rittavlan"
             >
               <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
             </button>
           </div>
+
+          {/* Floating Compact Lineups Menu under top right controls bar */}
+          <AnimatePresence>
+            {showSavedLineups && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="fixed top-14 right-3 z-[155] w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 max-h-[60vh] overflow-y-auto scrollbar-thin pointer-events-auto font-sans"
+              >
+                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2 mb-1">
+                  <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Mina Laguppställningar</span>
+                  <button 
+                    onClick={() => setShowSavedLineups(false)}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-250 transition-colors p-0.5 rounded"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[45vh] pr-0.5">
+                  {lineups.filter(l => !l.isArchived).length === 0 ? (
+                    <p className="text-[10px] text-zinc-400 dark:text-zinc-650 italic p-2 text-center">Inga sparade laguppställningar än...</p>
+                  ) : (
+                    Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => {
+                      const isSelected = l.id === lineup?.id;
+                      return (
+                        <button
+                          key={l.id}
+                          onClick={() => {
+                            handleSelectLineupWithHistory(l.id);
+                          }}
+                          className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between text-xs font-bold ${
+                            isSelected
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
+                              : 'bg-zinc-50 dark:bg-zinc-950/40 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200/50 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700'
+                          }`}
+                        >
+                          <span className="truncate pr-2">{l.matchTitle || l.teamName || 'Namnlös Match'}</span>
+                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded shrink-0 ${
+                            isSelected 
+                              ? 'bg-white/20 text-white' 
+                              : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                          }`}>
+                            {l.formation || 'Ingen'}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Floating Compact Zoom Menu under top right controls bar */}
+          <AnimatePresence>
+            {showZoomMenu && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="fixed top-14 right-3 z-[155] w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3.5 flex flex-col gap-3 pointer-events-auto font-sans"
+              >
+                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                  <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Zoominställningar</span>
+                  <button 
+                    onClick={() => setShowZoomMenu(false)}
+                    className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors p-0.5 rounded"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {/* Field Zoom */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Spelplanens storlek (Zoom)</span>
+                    <div className="flex items-center justify-between bg-zinc-50 dark:bg-black/20 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                      <button 
+                        onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
+                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
+                        title="Minska planens zoom"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <div className="flex flex-col items-center">
+                        <span className="text-[11px] font-black text-zinc-900 dark:text-white">{Math.round(fullScreenZoom * 100)}%</span>
+                        {fullScreenZoom !== 1 && (
+                          <button 
+                            onClick={() => setFullScreenZoom(1)}
+                            className="text-[9px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-0.5"
+                          >
+                            Återställ
+                          </button>
+                        )}
+                      </div>
+                      <button 
+                        onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
+                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
+                        title="Öka planens zoom"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Player Scale */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Spelarnas storlek</span>
+                    <div className="flex items-center justify-between bg-zinc-50 dark:bg-black/20 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                      <button 
+                        onClick={() => {
+                          setPlayerScale(Math.max(0.5, playerScale - 0.05));
+                          setHasUnsavedChanges(true);
+                        }}
+                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
+                        title="Minska spelarnas storlek"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <div className="flex flex-col items-center">
+                        <span className="text-[11px] font-black text-zinc-900 dark:text-white">{Math.round(playerScale * 100)}%</span>
+                        {playerScale !== 1 && (
+                          <button 
+                            onClick={() => {
+                              setPlayerScale(1);
+                              setHasUnsavedChanges(true);
+                            }}
+                            className="text-[9px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-0.5"
+                          >
+                            Återställ
+                          </button>
+                        )}
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setPlayerScale(Math.min(2.0, playerScale + 0.05));
+                          setHasUnsavedChanges(true);
+                        }}
+                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
+                        title="Öka spelarnas storlek"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Floating Compact Bench Dock in maximized mode */}
+          <AnimatePresence>
+            {showBenchMaximized && (
+              <motion.div 
+                initial={orientation === 'vertical' 
+                  ? { opacity: 0, x: -40, y: '-50%' } 
+                  : { opacity: 0, y: 30, x: '-50%' }}
+                animate={orientation === 'vertical'
+                  ? { opacity: 1, x: 0, y: '-50%' }
+                  : { opacity: 1, y: 0, x: '-50%' }}
+                exit={orientation === 'vertical'
+                  ? { opacity: 0, x: -40, y: '-50%' }
+                  : { opacity: 0, y: 30, x: '-50%' }}
+                style={orientation === 'vertical' ? { top: '50%' } : undefined}
+                className={orientation === 'vertical' 
+                  ? "fixed left-4 z-[99] w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-4 flex flex-col gap-3 pointer-events-auto font-sans max-h-[75vh]" 
+                  : `fixed left-1/2 z-[99] w-[95vw] max-w-xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 pointer-events-auto font-sans transition-all duration-300 ${isControlsVisible ? 'bottom-40 md:bottom-36' : 'bottom-6'}`}
+              >
+                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-1.5 px-1 bg-transparent">
+                  <div className="flex items-center gap-1.5">
+                    <Shirt size={14} className="text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Avbytarbänk ({subs.length})</span>
+                  </div>
+                  <button 
+                    onClick={() => setShowBenchMaximized(false)}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-0.5 rounded"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                
+                <div className={orientation === 'vertical' 
+                  ? "flex flex-col gap-2 overflow-y-auto max-h-[60vh] pr-1.5 scrollbar-thin"
+                  : "flex items-center gap-2 overflow-x-auto min-h-[64px] scrollbar-thin py-1 px-1"}
+                >
+                  {subs.length === 0 ? (
+                    <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-3 text-center w-full">Inga avbytare i den här laguppställningen...</p>
+                  ) : (
+                    subs.map(p => {
+                      const sp = getSquadPlayer(p.playerId);
+                      if (!sp) return null;
+                      
+                      return (
+                        <button
+                          key={p.id}
+                          className={orientation === 'vertical'
+                            ? "flex items-center gap-3 w-full px-3 py-2.5 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-950/20 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-all active:scale-95 text-left"
+                            : "flex flex-col items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-xl border border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700/50 transition-all active:scale-95"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // Quick add to holding area on pitch
+                            pushHistory();
+                            setActivePlayers((prev: LineupPlayer[]) => {
+                              // Any existing holding player gets deselected, but remains on the field!
+                              const nextState = prev.map(lp => {
+                                if (lp.id === p.id) {
+                                  return lp; // Clicked player
+                                }
+                                if (lp.isHolding) {
+                                  return { ...lp, isHolding: false };
+                                }
+                                return lp;
+                              });
+
+                              // Calculate best spawn corner based on current field starters
+                              const spawnPos = calculateBestSpawnPosition(nextState);
+
+                              return nextState.map(lp => {
+                                if (lp.id === p.id) {
+                                  return { ...lp, isSubstitute: false, x: spawnPos.x, y: spawnPos.y, isHolding: true };
+                                }
+                                return lp;
+                              });
+                            });
+                            setHasUnsavedChanges(true);
+                          }}
+                        >
+                          <div className="relative shrink-0">
+                            <div 
+                              className="rounded-full border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm"
+                              style={{
+                                width: '2.5rem',
+                                height: '2.5rem',
+                                display: showPhoto ? 'flex' : 'none'
+                              }}
+                            >
+                              {sp.photoUrl ? (
+                                <CachedImage 
+                                  src={sp.photoUrl} 
+                                  alt={sp.name} 
+                                  className="w-full h-full object-cover" 
+                                  loading="lazy"
+                                  decoding="async"
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                                  <User size={16} />
+                                </div>
+                              )}
+                            </div>
+                            {sp.number && showNumber && (
+                              <div 
+                                className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border border-white shadow-sm z-10"
+                                style={{
+                                  width: '1.2rem',
+                                  height: '1.2rem',
+                                  fontSize: '0.5rem',
+                                  bottom: showPhoto ? -2 : 'auto',
+                                  right: showPhoto ? -2 : 'auto',
+                                  top: !showPhoto ? '50%' : 'auto',
+                                  left: !showPhoto ? '50%' : 'auto',
+                                  transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                                  position: showPhoto ? 'absolute' : 'relative',
+                                }}
+                              >
+                                {sp.number}
+                              </div>
+                            )}
+                          </div>
+                          {orientation === 'vertical' ? (
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                                {sp.name}
+                              </span>
+                              <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mt-0.5">
+                                Tryck för att sätta på plan
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[9px] font-bold text-zinc-700 dark:text-zinc-350 truncate max-w-[64px] text-center leading-tight">
+                              {getVisibleName(sp.name)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {isControlsVisible && (
@@ -2395,6 +3381,34 @@ export default function LineupBuilder({
                   >
                     <GripVertical size={20} />
                   </div>
+                  
+                  {/* Undo, Redo & Clear moved to the left */}
+                  <div className="flex items-center gap-1 bg-black/5 dark:bg-black/20 p-1 rounded-xl mr-1">
+                    <button 
+                      onClick={handleUndo}
+                      className={`p-2 rounded-lg transition-all ${history.length === 0 ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      disabled={history.length === 0}
+                      title="Ångra"
+                    >
+                      <Undo2 size={18} />
+                    </button>
+                    <button 
+                      onClick={handleRedo}
+                      className={`p-2 rounded-lg transition-all ${future.length === 0 ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      disabled={future.length === 0}
+                      title="Gör om"
+                    >
+                      <Redo2 size={18} />
+                    </button>
+                    <button 
+                      onClick={clearTactical}
+                      className="p-2 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-all font-bold"
+                      title="Radera allt"
+                    >
+                      <Trash size={18} />
+                    </button>
+                  </div>
+
                   <button 
                     onClick={() => setTacticalTool('move')}
                     className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'move' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
@@ -2424,11 +3438,25 @@ export default function LineupBuilder({
                     <Route size={20} strokeWidth={2.5} />
                   </button>
                   <button 
+                    onClick={() => setTacticalTool('circle')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'circle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Rita cirkel"
+                  >
+                    <div className="w-5 h-5 rounded-full border-2 border-current" />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('text')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'text' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Skriv text"
+                  >
+                    <Type size={20} strokeWidth={2.5} />
+                  </button>
+                  <button 
                     onClick={() => setTacticalTool('ball')}
                     className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     title="Placera boll"
                   >
-                    <Circle size={20} strokeWidth={2.5} />
+                    <SoccerBallIcon size={20} className={tacticalTool === 'ball' ? 'text-white' : 'text-zinc-500'} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('opponent')}
@@ -2446,97 +3474,25 @@ export default function LineupBuilder({
                   </button>
                 </div>
 
-                <div className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Field Zoom */}
-                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
-                    <button 
-                      onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
-                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <div className="flex flex-col items-center min-w-10">
-                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Zoom</span>
-                      <span className="text-[10px] font-black text-zinc-900 dark:text-white leading-none">{Math.round(fullScreenZoom * 100)}%</span>
-                    </div>
-                    <button 
-                      onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
-                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
 
-                  {/* Player Scale */}
-                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
-                    <button 
-                      onClick={() => {
-                        setPlayerScale(Math.max(0.5, playerScale - 0.05));
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <div className="flex flex-col items-center min-w-10">
-                      <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter leading-tight">Spelare</span>
-                      <span className="text-[10px] font-black text-zinc-900 dark:text-white leading-none">{Math.round(playerScale * 100)}%</span>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        setPlayerScale(Math.min(1.5, playerScale + 0.05));
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
 
-                {/* Common Actions moved to Row 1 */}
-                <div className="flex items-center gap-2 ml-auto pr-2 shrink-0">
-                  <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
-                    <button 
-                      onClick={handleUndo}
-                      className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
-                      title="Ångra"
-                    >
-                      <RotateCcw size={16} />
-                    </button>
-                    <button 
-                      onClick={clearTactical}
-                      className="p-2 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-all"
-                      title="Radera allt"
-                    >
-                      <Trash size={16} />
-                    </button>
-                  </div>
 
-                  <button 
-                    onClick={() => setShowNotesModal(true)}
-                    className="p-2.5 rounded-xl bg-amber-600/10 text-amber-600 border border-amber-600/20 hover:bg-amber-600/20 transition-all"
-                    title="Anteckningar"
-                  >
-                    <ClipboardList size={20} />
-                  </button>
-                </div>
+
               </div>
 
               {/* Row 2: Contextual Settings & Actions */}
-              <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
+              <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent">
                 <AnimatePresence mode="wait">
-                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow') && (
+                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'text') && (
                     <motion.div 
-                      key="pen-settings"
+                      key="context-settings"
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
                       className="flex items-center gap-3 shrink-0"
                     >
-                      {/* Pen Colors */}
+                      {/* Tool Colors */}
                       <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 overflow-visible">
                         <ColorPicker 
                           selectedColor={tacticalColor} 
@@ -2546,40 +3502,63 @@ export default function LineupBuilder({
                         />
                       </div>
 
-                      {/* Line Type */}
-                      <div className="flex bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
-                        <button 
-                          onClick={() => setTacticalLineType('solid')}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'solid' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                        >
-                          Hel
-                        </button>
-                        <button 
-                          onClick={() => setTacticalLineType('dashed')}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'dashed' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                        >
-                          Sträck
-                        </button>
-                      </div>
+                      {/* Tool Specific Settings */}
+                      <div className="flex items-center gap-3">
+                        {tacticalTool === 'text' ? (
+                          <div className="flex flex-col gap-0.5">
+                             <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Textstorlek</span>
+                             <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
+                               <button onClick={() => setTacticalFontSize(Math.max(8, tacticalFontSize - 2))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
+                               <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{tacticalFontSize}</span>
+                               <button onClick={() => setTacticalFontSize(Math.min(72, tacticalFontSize + 2))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
+                             </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                             <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Tjocklek</span>
+                             <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
+                               <button onClick={() => setTacticalLineWidth(Math.max(0.1, tacticalLineWidth - 0.1))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
+                               <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{tacticalLineWidth.toFixed(1)}</span>
+                               <button onClick={() => setTacticalLineWidth(Math.min(5, tacticalLineWidth + 0.1))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
+                             </div>
+                          </div>
+                        )}
 
-                      {/* Line Width */}
-                      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
-                        <button 
-                          onClick={() => setTacticalLineWidth(Math.max(0.4, tacticalLineWidth - 0.2))}
-                          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <div className="flex flex-col items-center min-w-8">
-                          <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter">Bredd</span>
-                          <span className="text-[10px] font-black text-zinc-900 dark:text-white">{Math.round(tacticalLineWidth * 10)}</span>
+                        {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle') && (
+                          <div className="flex bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
+                            <button 
+                              onClick={() => setTacticalLineType('solid')}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'solid' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                            >
+                              Hel
+                            </button>
+                            <button 
+                              onClick={() => setTacticalLineType('dashed')}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'dashed' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                            >
+                              Sträck
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {tacticalTool === 'ball' && (
+                    <motion.div 
+                      key="ball-settings"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="flex items-center gap-3 shrink-0"
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Bollstorlek</span>
+                        <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
+                          <button onClick={() => setFootballScale(Math.max(0.5, footballScale - 0.1))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
+                          <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{(footballScale * 100).toFixed(0)}%</span>
+                          <button onClick={() => setFootballScale(Math.min(3, footballScale + 0.1))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
                         </div>
-                        <button 
-                          onClick={() => setTacticalLineWidth(Math.min(2.0, tacticalLineWidth + 0.2))}
-                          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                        >
-                          <Plus size={14} />
-                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -2627,13 +3606,87 @@ export default function LineupBuilder({
 
                   {tacticalTool === 'move' && (
                     <motion.div 
-                      key="move-info"
+                      key="move-settings"
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      className="flex items-center px-4 py-2 bg-white/5 rounded-xl"
+                      className="flex items-center gap-4 shrink-0"
                     >
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Flyttläge aktivt</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Lagformation</span>
+                        <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                          {Array.from(new Set(pinnedFormationIds)).slice(0, 3).map(id => {
+                            const temp = FORMATION_TEMPLATES.find(t => t.id === id);
+                            if (temp) {
+                              const variant = temp.variants[0];
+                              const isSelected = currentFormation === variant.name;
+                              return (
+                                <button
+                                  key={id}
+                                  onClick={() => applyFormation(variant)}
+                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${
+                                    isSelected 
+                                      ? 'bg-indigo-600 text-white shadow-sm' 
+                                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800'
+                                  }`}
+                                >
+                                  {temp.name}
+                                </button>
+                              );
+                            }
+                            return null;
+                          })}
+                          <button 
+                            onClick={() => setShowFormationModal(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 transition-all border border-dashed border-zinc-300 dark:border-zinc-700 ml-1"
+                          >
+                            <Layout size={12} />
+                            <span>{currentFormation || 'Fler'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-800" />
+
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Status</span>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center px-4 py-1.5 bg-zinc-100 dark:bg-black/20 rounded-xl">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Flyttläge aktivt</span>
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                              const positions: FormationPosition[] = tacticalPlayers
+                                .filter(p => !p.isSubstitute)
+                                .map(p => ({
+                                  id: p.id,
+                                  x: p.x,
+                                  y: p.y,
+                                  role: p.role || 'Player'
+                                }));
+                              
+                              if (positions.length > 0) {
+                                setNewFormationName('');
+                                setTempFormation({
+                                  id: crypto.randomUUID(),
+                                  name: "Min layout",
+                                  variants: [{
+                                    name: "Min layout",
+                                    positions
+                                  }]
+                                });
+                                setShowSaveFormation(true);
+                              }
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-zinc-700/50 transition-all font-black text-[10px] uppercase shadow-sm group"
+                            title="Spara denna layout som en ny formation"
+                          >
+                            <Save size={12} className="group-hover:scale-110 transition-transform" />
+                            Spara som formation
+                          </button>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2661,8 +3714,8 @@ export default function LineupBuilder({
         </div>
       )}
 
-      <div className="w-full overflow-hidden rounded-3xl">
-        <div className="transition-transform origin-top" style={{ transform: isMaximized ? `scale(${fullScreenZoom})` : 'none', transformOrigin: 'top center' }}>
+      <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden" : "w-full rounded-3xl"}>
+        <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden transition-all duration-300" : "transition-all duration-300"} style={{ zoom: isMaximized ? fullScreenZoom : undefined }}>
           {renderLineupContent(false)}
         </div>
       </div>
@@ -2766,6 +3819,17 @@ export default function LineupBuilder({
                 {orientation === 'landscape' ? <Smartphone size={20} /> : <Monitor size={20} />}
               </button>
               <button
+                onClick={() => setShowSavedLineups(!showSavedLineups)}
+                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
+                  showSavedLineups 
+                    ? 'bg-amber-600 text-white border-amber-500 shadow-md' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
+                }`}
+                title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
+              >
+                <FolderOpen size={20} />
+              </button>
+              <button
                 onClick={() => setShowPreview(true)}
                 className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
                 title="Förhandsgranska & Exportera"
@@ -2773,7 +3837,13 @@ export default function LineupBuilder({
                 <Download size={20} />
               </button>
               <button
-                onClick={() => setIsMaximized(!isMaximized)}
+                onClick={() => {
+                  const targetMaximized = !isMaximized;
+                  setIsMaximized(targetMaximized);
+                  setShowSavedLineups(!targetMaximized);
+                  setShowBenchMaximized(false);
+                  setShowZoomMenu(false);
+                }}
                 className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
                 title={isMaximized ? "Lämna rittavlan" : "Rittavla"}
               >
@@ -3190,128 +4260,130 @@ export default function LineupBuilder({
       </div>
     </>
     )}
-        <div className="mt-12 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
-            <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">Sparade Laguppställningar</h3>
-            <button
-              onClick={handleCreateNew}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-lg active:scale-95 w-full sm:w-auto"
-            >
-              <Plus size={16} />
-              <span>Skapa Ny</span>
-            </button>
-          </div>
-
-          <Reorder.Group 
-            axis="y" 
-            values={Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values())} 
-            onReorder={(reordered) => {
-              const archived = lineups.filter(l => l.isArchived);
-              onReorderLineups([...reordered, ...archived]);
-            }}
-            className="flex flex-col gap-3 w-full"
-          >
-            {lineups.filter(l => !l.isArchived).length === 0 ? (
-              <div className="p-8 text-center bg-white dark:bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
-                <p className="text-zinc-400 font-medium italic">Inga sparade laguppställningar än...</p>
-              </div>
-            ) : (
-              Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => (
-                <LineupReorderItem
-                  key={l.id}
-                  l={l}
-                  activeLineupId={lineup?.id}
-                  onSelectLineup={handleSelectLineupWithHistory}
-                  toggleArchive={toggleArchive}
-                  onCopyLineup={onCopyLineup}
-                  onDeleteLineup={onDeleteLineup}
-                  onEditTitle={openTitleEditForLineup}
-                />
-              ))
-            )}
-          </Reorder.Group>
-
-          {/* Archived Lineups Section */}
-          {lineups.some(l => l.isArchived) && (
-            <div className="pt-4 mt-8 border-t border-zinc-100 dark:border-zinc-800">
-              <button 
-                onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
-                className="flex items-center justify-between w-full px-4 py-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all group"
+        {!isMaximized && showSavedLineups && (
+          <div className="mt-12 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+              <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">Sparade Laguppställningar</h3>
+              <button
+                onClick={handleCreateNew}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-lg active:scale-95 w-full sm:w-auto"
               >
-                <div className="flex items-center gap-3">
-                  <Archive size={18} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
-                  <span className="text-sm font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
-                    Arkiverade ({lineups.filter(l => l.isArchived).length})
-                  </span>
-                </div>
-                {isArchiveExpanded ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+                <Plus size={16} />
+                <span>Skapa Ny</span>
               </button>
-
-              <AnimatePresence>
-                {isArchiveExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="flex flex-col gap-3 w-full mt-4">
-                      {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
-                        <div 
-                          key={l.id}
-                          className="group p-4 bg-white/50 dark:bg-zinc-900/30 rounded-3xl border border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
-                        >
-                          <div 
-                            className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
-                            onClick={() => handleSelectLineupWithHistory(l.id)}
-                          >
-                            <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-sm">
-                              {l.matchTitle || 'Namnlös Match'}
-                            </h4>
-                            <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-loose truncate block">
-                              Arkiverad
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
-                            <button
-                              onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
-                              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-950/20 rounded-lg transition-all"
-                              title="Redigera rubriker"
-                            >
-                              <Pencil size={16} />
-                            </button>
-                            <button
-                              onClick={(e) => toggleArchive(e, l.id)}
-                              className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
-                              title="Återställ"
-                            >
-                              <ArchiveRestore size={16} />
-                            </button>
-                            <button
-                              onClick={() => onCopyLineup(l.id)}
-                              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg transition-all"
-                              title="Kopiera"
-                            >
-                              <Copy size={16} />
-                            </button>
-                            <button
-                              onClick={() => onDeleteLineup(l.id)}
-                              className="p-2 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all"
-                              title="Radera"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
-          )}
-        </div>
+
+            <Reorder.Group 
+              axis="y" 
+              values={Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values())} 
+              onReorder={(reordered) => {
+                const archived = lineups.filter(l => l.isArchived);
+                onReorderLineups([...reordered, ...archived]);
+              }}
+              className="flex flex-col gap-3 w-full"
+            >
+              {lineups.filter(l => !l.isArchived).length === 0 ? (
+                <div className="p-8 text-center bg-white dark:bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
+                  <p className="text-zinc-400 font-medium italic">Inga sparade laguppställningar än...</p>
+                </div>
+              ) : (
+                Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                  <LineupReorderItem
+                    key={l.id}
+                    l={l}
+                    activeLineupId={lineup?.id}
+                    onSelectLineup={handleSelectLineupWithHistory}
+                    toggleArchive={toggleArchive}
+                    onCopyLineup={onCopyLineup}
+                    onDeleteLineup={onDeleteLineup}
+                    onEditTitle={openTitleEditForLineup}
+                  />
+                ))
+              )}
+            </Reorder.Group>
+
+            {/* Archived Lineups Section */}
+            {lineups.some(l => l.isArchived) && (
+              <div className="pt-4 mt-8 border-t border-zinc-100 dark:border-zinc-800">
+                <button 
+                  onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                  className="flex items-center justify-between w-full px-4 py-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <Archive size={18} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
+                    <span className="text-sm font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
+                      Arkiverade ({lineups.filter(l => l.isArchived).length})
+                    </span>
+                  </div>
+                  {isArchiveExpanded ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+                </button>
+
+                <AnimatePresence>
+                  {isArchiveExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex flex-col gap-3 w-full mt-4">
+                        {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                          <div 
+                            key={l.id}
+                            className="group p-4 bg-white/50 dark:bg-zinc-900/30 rounded-3xl border border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
+                          >
+                            <div 
+                              className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
+                              onClick={() => handleSelectLineupWithHistory(l.id)}
+                            >
+                              <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-sm">
+                                {l.matchTitle || 'Namnlös Match'}
+                              </h4>
+                              <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-loose truncate block">
+                                Arkiverad
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <button
+                                onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
+                                className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-950/20 rounded-lg transition-all"
+                                title="Redigera rubriker"
+                              >
+                                <Pencil size={16} />
+                              </button>
+                              <button
+                                onClick={(e) => toggleArchive(e, l.id)}
+                                className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
+                                title="Återställ"
+                              >
+                                <ArchiveRestore size={16} />
+                              </button>
+                              <button
+                                onClick={() => onCopyLineup(l.id)}
+                                className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg transition-all"
+                                title="Kopiera"
+                              >
+                                <Copy size={16} />
+                              </button>
+                              <button
+                                onClick={() => onDeleteLineup(l.id)}
+                                className="p-2 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all"
+                                title="Radera"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+        )}
       <AnimatePresence>
         {/* Logo Cropping Modal */}
         {showLogoPicker && logoToCrop && (
@@ -3467,8 +4539,9 @@ export default function LineupBuilder({
                     if (idToUpdate === lineup?.id) {
                       setLineupName(tempTitle);
                       setTeamName(tempTeamName);
-                      setHasUnsavedChanges(true);
-                      handleSave(); // Just closes modal
+                      setHasUnsavedChanges(true); // Let the auto-save effect handle the construction of the object
+                      setIsEditingTitle(false);
+                      setEditingLineupId(null);
                     } else {
                       const target = lineups.find(x => x.id === idToUpdate);
                       if (target) {
