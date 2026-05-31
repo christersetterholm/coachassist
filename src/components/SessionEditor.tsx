@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Plus, Trash2, GripVertical, Clock, Calendar, Check, AlertCircle, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, Copy, UserPlus, X, ClipboardList, Edit2, LayoutList, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
 import { TrainingSession, SessionMoment, Exercise, SquadPlayer } from '../types';
-import { sortPlayersByPosition } from '../lib/teamUtils';
 import TeamOverviewModal from './TeamOverviewModal';
+import { sortLeadersByPosition } from '../lib/teamUtils';
+import MomentCopyModal from './MomentCopyModal';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -18,8 +19,12 @@ interface SessionEditorProps {
   onEditExercise?: (id: string) => void;
   onDeleteExercise?: (id: string) => void;
   onMovePlayer?: (exerciseId: string, playerId: string, targetTeamId: string) => void;
+  onCopyTeams?: (sourceId: string, targetId: string) => void;
   initialMode?: 'plan' | 'live';
   onModeChange?: (mode: 'plan' | 'live') => void;
+  initialTab?: 'schema' | 'attendance';
+  allSessions?: TrainingSession[];
+  onUpdateSession?: (updated: TrainingSession) => void;
 }
 
 interface MomentItemProps {
@@ -50,7 +55,7 @@ function MomentItem({
   sessionDate,
   sessionTitle,
   updateMoment, 
-  removeMoment, 
+  removeMoment: _removeMoment, 
   setConfirmDeleteMoment,
   onCreateExercise, 
   onSelectExercise,
@@ -104,12 +109,9 @@ function MomentItem({
     if (!files || files.length === 0) return;
 
     const filesArray = Array.from(files) as File[];
-    let completedCount = 0;
     setUploadProgress(10);
     
     try {
-      const newUrls: string[] = [];
-
       // Process uploads in parallel for better performance and to reduce stale state window
       const uploadPromises = filesArray.map(async (file) => {
         // Check size (limit to 5MB for safety)
@@ -600,21 +602,31 @@ export default function SessionEditor({
   onEditExercise,
   onDeleteExercise,
   onMovePlayer,
+  onCopyTeams,
   initialMode = 'plan',
-  onModeChange
+  onModeChange,
+  initialTab = 'schema',
+  allSessions,
+  onUpdateSession
 }: SessionEditorProps) {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [showCopyModal, setShowCopyModal] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
   const [exerciseToDelete, setExerciseToDelete] = useState<{ exerciseId: string, momentId: string, name: string } | null>(null);
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
   const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
-  const [activeTab, setActiveTab] = useState<'schema' | 'attendance'>('schema');
+  const [activeTab, setActiveTab] = useState<'schema' | 'attendance'>(initialTab);
   const mode = initialMode;
   const setMode = onModeChange || (() => {});
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Sync activeTab when initialTab or session changes
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, session.id]);
 
   // Use a ref for the session to avoid stale closures in event handlers
   const sessionRef = useRef(session);
@@ -781,6 +793,8 @@ export default function SessionEditor({
             squad={[...(squad || []), ...(session.guestPlayers || [])]}
             onMovePlayer={onMovePlayer || (() => {})}
             onClose={() => setSelectedExerciseForTeams(null)}
+            exercises={exercises}
+            onCopyTeams={(sourceId) => onCopyTeams && onCopyTeams(sourceId, selectedExerciseForTeams)}
             onAddGuest={handleQuickAddGuest}
             onStart={() => {
               const id = selectedExerciseForTeams;
@@ -858,7 +872,7 @@ export default function SessionEditor({
 
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
+        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
           <button 
             onClick={onClose}
             className="p-2 -ml-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
@@ -891,7 +905,7 @@ export default function SessionEditor({
           </button>
         </div>
 
-        <div className="max-w-4xl mx-auto px-4 pb-3 flex flex-col gap-2">
+        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 pb-3 flex flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1058,7 +1072,7 @@ export default function SessionEditor({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto p-4 sm:p-6"
       >
-        <div className="w-full max-w-4xl mx-auto space-y-6">
+        <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
           {activeTab === 'schema' ? (
             <>
               {/* Notes Section */}
@@ -1188,14 +1202,26 @@ export default function SessionEditor({
                    </div>
                 )}
                 {mode === 'plan' && (
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => addMoment()}
-                    className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
-                  >
-                    <PlusCircle size={18} />
-                    Lägg till moment
-                  </motion.button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => addMoment()}
+                      className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
+                    >
+                      <PlusCircle size={16} />
+                      Lägg till moment
+                    </motion.button>
+                    {allSessions && onUpdateSession && (
+                      <motion.button
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setShowCopyModal(true)}
+                        className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-350 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
+                      >
+                        <Copy size={14} />
+                        Kopiera / Hämta övningar
+                      </motion.button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -1254,14 +1280,24 @@ export default function SessionEditor({
               )}
 
               {session.moments.length === 0 && (
-                <div className="text-center py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl">
-                  <p className="text-zinc-400 text-sm font-medium mb-4">Inga moment tillagda än</p>
-                  <button
-                    onClick={() => addMoment()}
-                    className="bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 px-4 py-2 rounded-xl font-bold text-sm hover:bg-zinc-200"
-                  >
-                    Lägg till första momentet
-                  </button>
+                <div className="text-center py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl flex flex-col items-center justify-center gap-3">
+                  <p className="text-zinc-400 text-sm font-medium">Inga moment tillagda än</p>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      onClick={() => addMoment()}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
+                    >
+                      Lägg till första momentet
+                    </button>
+                    {allSessions && onUpdateSession && (
+                      <button
+                        onClick={() => setShowCopyModal(true)}
+                        className="bg-zinc-105 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                      >
+                        Hämta från annat pass
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </>
@@ -1366,6 +1402,17 @@ export default function SessionEditor({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Moment Copy Modal */}
+      {allSessions && onUpdateSession && (
+        <MomentCopyModal
+          isOpen={showCopyModal}
+          onClose={() => setShowCopyModal(false)}
+          currentSession={session}
+          allSessions={allSessions}
+          onUpdateSession={onUpdateSession}
+        />
+      )}
     </div>
   );
 }
@@ -1381,6 +1428,7 @@ function ParticipantManager({
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [guestPosition, setGuestPosition] = useState("");
   const [sortAttendingFirst, setSortAttendingFirst] = useState(false);
   const attendance = session.attendance || [];
   const guestPlayers = session.guestPlayers || [];
@@ -1399,6 +1447,7 @@ function ParticipantManager({
     const newGuest: SquadPlayer = {
       id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
       name: guestName.trim(),
+      position: guestPosition.trim() || undefined,
     };
 
     // Update both in one go to ensure consistency and prevent state overwrite
@@ -1409,6 +1458,7 @@ function ParticipantManager({
       updatedAt: Date.now()
     });
     setGuestName("");
+    setGuestPosition("");
   };
 
   const removeGuest = (id: string) => {
@@ -1416,6 +1466,14 @@ function ParticipantManager({
       ...session,
       guestPlayers: guestPlayers.filter(p => p.id !== id),
       attendance: attendance.filter(pid => pid !== id),
+      updatedAt: Date.now()
+    });
+  };
+
+  const updateGuestPosition = (guestId: string, position: string) => {
+    onUpdate({
+      ...session,
+      guestPlayers: guestPlayers.map(p => p.id === guestId ? { ...p, position: position || undefined } : p),
       updatedAt: Date.now()
     });
   };
@@ -1490,6 +1548,34 @@ function ParticipantManager({
     });
   }, [squad, attendance, sortAttendingFirst]);
 
+  const sortedPlayers = useMemo(() => {
+    return sortedSquad.filter(p => p.role !== 'leader');
+  }, [sortedSquad]);
+
+  const sortedLeaders = useMemo(() => {
+    const leadersList = sortedSquad.filter(p => p.role === 'leader');
+    if (sortAttendingFirst) {
+      const presentLeaders = sortLeadersByPosition(leadersList.filter(p => attendance.includes(p.id)));
+      const absentLeaders = sortLeadersByPosition(leadersList.filter(p => !attendance.includes(p.id)));
+      return [...presentLeaders, ...absentLeaders];
+    }
+    return sortLeadersByPosition(leadersList);
+  }, [sortedSquad, sortAttendingFirst, attendance]);
+
+  const attendingPlayersCount = useMemo(() => {
+    return attendance.filter(id => {
+      const p = squad.find(x => x.id === id);
+      return !p || p.role !== 'leader';
+    }).length;
+  }, [attendance, squad]);
+
+  const attendingLeadersCount = useMemo(() => {
+    return attendance.filter(id => {
+      const p = squad.find(x => x.id === id);
+      return p && p.role === 'leader';
+    }).length;
+  }, [attendance, squad]);
+
   return (
     <div className="space-y-8">
       <div className="space-y-6">
@@ -1497,9 +1583,9 @@ function ParticipantManager({
           <div>
             <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <Users size={16} />
-              Närvarande ({attendance.length})
+              Närvarande ({attendingPlayersCount} spelare{squad.some(p => p.role === 'leader') ? `, ${attendingLeadersCount} ledare` : ''})
             </h3>
-            <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj spelare från truppen eller lägg till provspelare</p>
+            <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj medlemmar från truppen eller lägg till provspelare</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <button
@@ -1539,39 +1625,88 @@ function ParticipantManager({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {sortedSquad.map(player => {
-            const isPresent = attendance.includes(player.id);
-            return (
-              <button
-                key={player.id}
-                onClick={() => handleTogglePlayer(player.id)}
-                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
-                  isPresent 
-                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm' 
-                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                  isPresent ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-                }`}>
-                  {player.photoUrl ? (
-                    <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
-                  ) : (
-                    <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-indigo-900 dark:text-indigo-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
-                    {player.name}
-                  </p>
-                  {player.number && (
-                    <p className="text-[10px] font-bold text-zinc-400">#{player.number}</p>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+        <div className="space-y-6">
+          {/* Players List */}
+          <div className="space-y-2">
+            {sortedLeaders.length > 0 && (
+              <h4 className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1">Spelare</h4>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {sortedPlayers.map(player => {
+                const isPresent = attendance.includes(player.id);
+                return (
+                  <button
+                    key={player.id}
+                    onClick={() => handleTogglePlayer(player.id)}
+                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
+                      isPresent 
+                        ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm' 
+                        : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                      isPresent ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                    }`}>
+                      {player.photoUrl ? (
+                        <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                      ) : (
+                        <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-indigo-900 dark:text-indigo-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                        {player.name}
+                      </p>
+                      {player.number && (
+                        <p className="text-[10px] font-bold text-zinc-400">#{player.number}</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Leaders List */}
+          {sortedLeaders.length > 0 && (
+            <div className="space-y-2 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <h4 className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1">Ledare</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {sortedLeaders.map(player => {
+                  const isPresent = attendance.includes(player.id);
+                  return (
+                    <button
+                      key={player.id}
+                      onClick={() => handleTogglePlayer(player.id)}
+                      className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
+                        isPresent 
+                          ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-650 shadow-sm' 
+                          : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                        isPresent ? 'bg-zinc-700 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                      }`}>
+                        {player.photoUrl ? (
+                          <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                        ) : (
+                          <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                          {player.name}
+                        </p>
+                        <p className="text-[9px] font-bold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider">
+                          {player.position || 'Ledare'}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1584,7 +1719,7 @@ function ParticipantManager({
           </h4>
         </div>
 
-        <form onSubmit={handleAddGuest} className="flex flex-col sm:flex-row gap-4 w-full">
+        <form onSubmit={handleAddGuest} className="flex flex-col sm:flex-row gap-3 w-full">
           <input
             type="text"
             value={guestName}
@@ -1592,6 +1727,19 @@ function ParticipantManager({
             placeholder="Namn på provspelare..."
             className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm min-w-0"
           />
+          <select
+            value={guestPosition}
+            onChange={(e) => setGuestPosition(e.target.value)}
+            className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer"
+          >
+            <option value="">Position (Valfritt)</option>
+            <option value="MV">Målvakt (MV)</option>
+            <option value="MB">Mittback (MB)</option>
+            <option value="YB">Ytterback (YB)</option>
+            <option value="MF">Mittfältare (MF)</option>
+            <option value="YMF">Yttermittfältare (YMF)</option>
+            <option value="FW">Forward (FW)</option>
+          </select>
           <button
             type="submit"
             className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all active:scale-95 whitespace-nowrap min-h-[44px]"
@@ -1606,31 +1754,53 @@ function ParticipantManager({
             return (
               <div
                 key={guest.id}
-                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all group relative ${
+                className={`flex items-center justify-between gap-2 p-3 rounded-2xl border transition-all group relative ${
                   isPresent 
-                    ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm' 
+                    ? 'bg-amber-50/80 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm' 
                     : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'
                 }`}
               >
-                <button
-                  onClick={() => handleTogglePlayer(guest.id)}
-                  className="flex flex-1 items-center gap-3 min-w-0"
-                >
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                    isPresent ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-                  }`}>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePlayer(guest.id)}
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                      isPresent ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                    }`}
+                  >
                     <span className="text-[10px] font-black uppercase text-white">{guest.name.substring(0, 1)}</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-amber-900 dark:text-amber-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePlayer(guest.id)}
+                      className={`text-xs font-black truncate uppercase text-left w-full block hover:underline ${
+                        isPresent ? 'text-amber-900 dark:text-amber-100' : 'text-zinc-600 dark:text-zinc-400'
+                      }`}
+                    >
                       {guest.name}
-                    </p>
-                    <p className="text-[8px] font-bold text-amber-500 uppercase tracking-tighter">Provspelare</p>
+                    </button>
+                    <div className="flex items-center">
+                      <select
+                        value={guest.position || ""}
+                        onChange={(e) => updateGuestPosition(guest.id, e.target.value)}
+                        className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-transparent border-none focus:ring-0 cursor-pointer outline-none uppercase p-0 m-0"
+                      >
+                        <option value="" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Provspelare</option>
+                        <option value="MV" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mv (Målvakt)</option>
+                        <option value="MB" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mb (Mittback)</option>
+                        <option value="YB" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Yb (Ytterback)</option>
+                        <option value="MF" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mf (Mittfält)</option>
+                        <option value="YMF" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Ymf (Ytter-mf)</option>
+                        <option value="FW" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Fw (Forward)</option>
+                      </select>
+                    </div>
                   </div>
-                </button>
+                </div>
                 <button
+                  type="button"
                   onClick={() => removeGuest(guest.id)}
-                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                  className="p-1.5 text-zinc-300 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
                 >
                   <X size={14} />
                 </button>

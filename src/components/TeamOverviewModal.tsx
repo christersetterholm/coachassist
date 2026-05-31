@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Users, Plus, LayoutList, Play, X, UserPlus } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Users, Plus, LayoutList, Play, X, UserPlus, Copy, ChevronDown } from 'lucide-react';
 import { Exercise, SquadPlayer } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
 
@@ -11,7 +11,9 @@ interface TeamOverviewModalProps {
   onMovePlayer: (exerciseId: string, playerId: string, targetTeamId: string) => void;
   onClose: () => void;
   onStart?: () => void;
-  onAddGuest?: (name: string) => void;
+  onAddGuest?: (name: string, position?: string) => void;
+  exercises?: Exercise[];
+  onCopyTeams?: (sourceExerciseId: string) => void;
 }
 
 export default function TeamOverviewModal({
@@ -21,12 +23,16 @@ export default function TeamOverviewModal({
   onMovePlayer,
   onClose,
   onStart,
-  onAddGuest
+  onAddGuest,
+  exercises = [],
+  onCopyTeams
 }: TeamOverviewModalProps) {
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [showGuestInput, setShowGuestInput] = useState(false);
   const [guestName, setGuestName] = useState("");
+  const [guestPosition, setGuestPosition] = useState("");
+  const [showCopyDropdown, setShowCopyDropdown] = useState(false);
 
   // Identify players who are attending but not in any team or joker pool
   const assignedPlayerIds = new Set([
@@ -42,6 +48,15 @@ export default function TeamOverviewModal({
     : [];
 
   const isUnassignedDragging = draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId);
+
+  const copyableExercises = exercises
+    .filter(e => e.id !== exercise.id && e.teams.some(t => (t.playerIds?.length || 0) > 0))
+    .sort((a, b) => {
+      const aSame = a.sessionId === exercise.sessionId ? 1 : 0;
+      const bSame = b.sessionId === exercise.sessionId ? 1 : 0;
+      if (aSame !== bSame) return bSame - aSame;
+      return b.createdAt - a.createdAt;
+    });
 
   const handleDragUpdate = (x: number, y: number) => {
     const targetId = detectTarget(x, y);
@@ -116,56 +131,118 @@ export default function TeamOverviewModal({
             <Plus size={24} className="rotate-45" />
           </button>
         </div>
-
         <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-          {onAddGuest && (
-            <div className="mb-8 p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-               {!showGuestInput ? (
-                <button
-                  onClick={() => setShowGuestInput(true)}
-                  className="w-full flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm"
-                >
-                  <UserPlus size={16} />
-                  Lägg till provspelare / gäst
-                </button>
-               ) : (
-                <form 
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (guestName.trim()) {
-                      onAddGuest(guestName.trim());
-                      setGuestName("");
-                      setShowGuestInput(false);
-                    }
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    autoFocus
-                    type="text"
-                    value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
-                    placeholder="Namn på gäst..."
-                    className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm"
-                  >
-                    Lägg till
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowGuestInput(false);
-                      setGuestName("");
-                    }}
-                    className="p-2 text-zinc-400 hover:text-red-500"
-                  >
-                    <X size={20} />
-                  </button>
-                </form>
-               )}
+          {((onAddGuest) || (onCopyTeams && copyableExercises.length > 0)) && (
+            <div className={onAddGuest && onCopyTeams && copyableExercises.length > 0 ? "grid grid-cols-1 md:grid-cols-2 gap-6 mb-8" : "mb-8"}>
+              {onAddGuest && (
+                <div className="p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 flex flex-col justify-center">
+                  {!showGuestInput ? (
+                    <button
+                      onClick={() => setShowGuestInput(true)}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm"
+                    >
+                      <UserPlus size={16} className="text-zinc-500" />
+                      Lägg till provspelare / gäst
+                    </button>
+                  ) : (
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (guestName.trim()) {
+                          onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
+                          setGuestName("");
+                          setGuestPosition("");
+                          setShowGuestInput(false);
+                        }
+                      }}
+                      className="flex flex-col sm:flex-row gap-2 w-full"
+                    >
+                      <input
+                        autoFocus
+                        type="text"
+                        value={guestName}
+                        onChange={(e) => setGuestName(e.target.value)}
+                        placeholder="Namn på gäst..."
+                        className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-2 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                      <select
+                        value={guestPosition}
+                        onChange={(e) => setGuestPosition(e.target.value)}
+                        className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                      >
+                        <option value="">Position (Valfritt)</option>
+                        <option value="MV">Målvakt (MV)</option>
+                        <option value="MB">Mittback (MB)</option>
+                        <option value="YB">Ytterback (YB)</option>
+                        <option value="MF">Mittfältare (MF)</option>
+                        <option value="YMF">Yttermittfältare (YMF)</option>
+                        <option value="FW">Forward (FW)</option>
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          className="flex-1 shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm whitespace-nowrap"
+                        >
+                          Lägg till
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowGuestInput(false);
+                            setGuestName("");
+                            setGuestPosition("");
+                          }}
+                          className="p-2 text-zinc-400 hover:text-red-500"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {onCopyTeams && copyableExercises.length > 0 && (
+                <div className="p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-100 dark:border-zinc-800 relative flex flex-col justify-center">
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCopyDropdown(!showCopyDropdown)}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm"
+                    >
+                      <Copy size={16} className="text-zinc-500" />
+                      Koppla/Kopiera lagindelning
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${showCopyDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCopyDropdown && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl shadow-xl z-[160] max-h-60 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-805">
+                        {copyableExercises.map(ex => {
+                          const totalPlayers = ex.teams.reduce((sum, t) => sum + (t.playerIds?.length || 0), 0);
+                          return (
+                            <button
+                              key={ex.id}
+                              onClick={() => {
+                                onCopyTeams(ex.id);
+                                setShowCopyDropdown(false);
+                              }}
+                              className="w-full text-left px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-950/40 transition-colors flex items-center justify-between"
+                            >
+                              <div className="min-w-0 pr-2 pb-0.5">
+                                <p className="font-extrabold text-xs text-zinc-900 dark:text-white truncate">{ex.name}</p>
+                                <p className="text-[10px] text-zinc-500 font-medium truncate">
+                                  {new Date(ex.date).toLocaleDateString('sv-SE')} • {ex.teams.length} lag
+                                </p>
+                              </div>
+                              <span className="shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-black text-[10px] px-2 py-1 rounded-lg">
+                                {totalPlayers} spelare
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -240,7 +317,7 @@ export default function TeamOverviewModal({
               );
             })}
 
-            {(exercise.jokerPlayerIds?.length || 0) > 0 && (() => {
+            {(!exercise.isFinished || (exercise.jokerPlayerIds || []).length > 0) && (() => {
               const isJokerDragging = draggedPlayerId && exercise.jokerPlayerIds?.includes(draggedPlayerId);
               return (
                 <div 
@@ -255,7 +332,7 @@ export default function TeamOverviewModal({
                     <div className="flex items-center gap-1.5 bg-indigo-200/50 dark:bg-indigo-900/50 px-2 py-1 rounded-lg text-indigo-600 dark:text-indigo-400">
                       <Users size={12} />
                       <span className="text-xs font-black">
-                        {exercise.jokerPlayerIds?.length}
+                        {(exercise.jokerPlayerIds || []).length}
                       </span>
                     </div>
                   </div>
@@ -300,6 +377,11 @@ export default function TeamOverviewModal({
                         </motion.div>
                       ) : null;
                     })}
+                    {(exercise.jokerPlayerIds || []).length === 0 && (
+                      <div className="w-full py-4 border-2 border-dashed border-indigo-200 dark:border-indigo-900/50 rounded-2xl flex items-center justify-center text-[10px] font-bold text-indigo-500 dark:text-indigo-400 uppercase tracking-widest text-center px-4">
+                        Släpp spelare här för Joker
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -45,7 +45,21 @@
       "description": "The full state of the user's training league.",
       "type": "object",
       "properties": {
-        "squad": { "type": "array" },
+        "squad": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "position": { "type": "string" },
+              "number": { "type": "string" },
+              "photoUrl": { "type": "string" },
+              "role": { "type": "string", "enum": ["player", "leader"] }
+            },
+            "required": ["id", "name"]
+          }
+        },
         "exercises": { "type": "array" },
         "sessions": { "type": "array" },
         "lineups": { "type": "array" },
@@ -54,6 +68,18 @@
         "currentPeriodId": { "type": "string" },
         "customFormations": { "type": "array" },
         "pinnedFormationIds": { "type": "array" },
+        "teamUrl": { "type": "string" },
+        "adminUrl": { "type": "string" },
+        "seriesUrl": { "type": "string" },
+        "trainingSettings": {
+          "type": "object",
+          "properties": {
+            "defaultStartTime": { "type": "string" },
+            "defaultEndTime": { "type": "string" },
+            "defaultDuration": { "type": "number" },
+            "icsUrl": { "type": "string" }
+          }
+        },
         "updatedAt": { "type": "number" }
       }
     },

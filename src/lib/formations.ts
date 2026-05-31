@@ -1,4 +1,4 @@
-import { FormationPosition, FormationVariant, FormationTemplate } from '../types';
+import { FormationTemplate } from '../types';
 
 // Outfield positions should be 10 players, sorted generally from back to front, left to right.
 // The GK position is usually fixed at (50, 90).

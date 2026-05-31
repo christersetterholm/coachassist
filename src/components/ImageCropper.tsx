@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
 import { X, Check, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 interface ImageCropperProps {
   image: string;

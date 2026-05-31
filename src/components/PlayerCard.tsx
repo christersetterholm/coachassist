@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Minus, Plus, Users, Palette, X } from 'lucide-react';
+import { Minus, Plus, Palette, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Team, SquadPlayer, VEST_COLORS, PRESET_COLORS } from '../types';
 

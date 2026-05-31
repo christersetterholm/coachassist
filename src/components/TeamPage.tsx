@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Globe, RefreshCcw, Home, Settings, ExternalLink, ChevronLeft, ChevronRight, ShieldCheck, Trophy, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Globe, RefreshCcw, Home, Settings, ExternalLink, ShieldCheck, Trophy, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TeamPageProps {

@@ -1,19 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Home as HomeIcon, Plus, UserPlus, X, Check, Sun, Moon, Timer as TimerIcon, Edit2, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Users, LayoutDashboard, Calendar, Share2, Lock, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, CloudOff } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PRESET_COLORS, PointsConfig, Period, PeriodStandings, Lineup, FormationVariant, TrainingSession, TrainingSettings, CoachData } from './types';
+import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData } from './types';
 import { auth, signInWithGoogle, db } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 
-const ICON_MAP: Record<string, any> = {
-  Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee
-};
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
-import GameList from './components/GameList';
-import ColorPicker from './components/ColorPicker';
 import Timer from './components/Timer';
 import SquadManager from './components/SquadManager';
 import Leaderboard from './components/Leaderboard';
@@ -31,6 +26,7 @@ const INITIAL_DATA: CoachData = {
   squad: [],
   exercises: [],
   sessions: [],
+  deletedSessions: [],
   lineups: [],
   activeLineupId: null,
   periods: [],
@@ -45,6 +41,35 @@ const INITIAL_DATA: CoachData = {
     defaultStartTime: '18:00',
     defaultDuration: 90
   }
+};
+
+const getSessionCategory = (session: TrainingSession): 'match' | 'training' | 'other' => {
+  const title = (session.title || '').trim().toLowerCase();
+  if (!title) {
+    return 'training';
+  }
+  if (
+    title.includes('match') || 
+    title.includes('vs') || 
+    title.includes('mot') || 
+    title.includes('seriematch') || 
+    title.includes('cup') || 
+    title.includes('kval') || 
+    title.includes('träningsmatch')
+  ) {
+    return 'match';
+  }
+  if (
+    title.includes('träning') || 
+    title.includes('pass') || 
+    title.includes('fys') || 
+    title.includes('praktik') || 
+    title.includes('istid') || 
+    title.includes('poolspel')
+  ) {
+    return 'training';
+  }
+  return 'other';
 };
 
 const isQuotaError = (error: any): boolean => {
@@ -71,6 +96,7 @@ export default function App() {
     squad = [], 
     exercises = [], 
     sessions = [], 
+    deletedSessions = [], 
     lineups = [], 
     activeLineupId, 
     periods = [], 
@@ -108,8 +134,9 @@ export default function App() {
     }
     return 'training';
   });
-  const [trainingTab, setTrainingTab] = useState<'planned' | 'completed' | 'exercises'>('planned');
+  const [trainingTab, setTrainingTab] = useState<'planned' | 'completed' | 'exercises' | 'calendar_view'>('calendar_view');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance'>('schema');
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -117,10 +144,16 @@ export default function App() {
   const [isEditingActiveExercise, setIsEditingActiveExercise] = useState(false);
   const [editReturnView, setEditReturnView] = useState<View | null>(null);
   const [showTeamOverview, setShowTeamOverview] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
+  const [hasPulledFromCloud, setHasPulledFromCloud] = useState(false);
+  const sessionActionCountRef = useRef(0);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync sessionActionCount to its ref for use in onSnapshot
+  useEffect(() => {
+    sessionActionCountRef.current = sessionActionCount;
+  }, [sessionActionCount]);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
@@ -219,13 +252,14 @@ export default function App() {
     return () => window.clearInterval(intervalId);
   }, [sessions]);
 
-  // Initial load from localStorage for guests
+  // Initial load from localStorage for quick bootstrap
   useEffect(() => {
-    if (isAuthReady && !user && !isInitialSyncDone) {
-      console.log("App: Loading guest data from localStorage");
+    if (isAuthReady && !isInitialSyncDone) {
+      console.log("App: Loading cached data from localStorage for quick bootstrap");
       const savedSquad = localStorage.getItem('football_squad');
       const savedExercises = localStorage.getItem('football_exercises');
       const savedSessions = localStorage.getItem('football_sessions');
+      const savedDeletedSessions = localStorage.getItem('football_deleted_sessions');
       const savedLineups = localStorage.getItem('football_lineups');
       const savedActiveLineupId = localStorage.getItem('active_lineup_id');
       const savedPeriods = localStorage.getItem('football_periods');
@@ -237,10 +271,15 @@ export default function App() {
       const savedCustomFormations = localStorage.getItem('custom_formations');
       const savedSettings = localStorage.getItem('training_settings');
 
+      // Robust Deduplication to prevent duplicate keys across components
+      const rawSquad = savedSquad ? JSON.parse(savedSquad) : [];
+      const deduplicatedSquad = Array.from(new Map(rawSquad.map((p: any) => [p.id, p])).values()) as SquadPlayer[];
+
       const newState: CoachData = {
-        squad: savedSquad ? JSON.parse(savedSquad) : [],
+        squad: deduplicatedSquad,
         exercises: savedExercises ? JSON.parse(savedExercises) : [],
         sessions: savedSessions ? JSON.parse(savedSessions) : [],
+        deletedSessions: savedDeletedSessions ? JSON.parse(savedDeletedSessions) : [],
         lineups: savedLineups ? JSON.parse(savedLineups) : [],
         activeLineupId: savedActiveLineupId || null,
         periods: savedPeriods ? JSON.parse(savedPeriods) : [],
@@ -256,8 +295,18 @@ export default function App() {
 
       setData(newState);
       
-      // For guests, we are effectively "done" with initial sync immediately
-      setIsInitialSyncDone(true);
+      if (!user) {
+        // For guests, we are fully loaded right away
+        setIsInitialSyncDone(true);
+      } else {
+        // For logged-in users, set a fallback timeout to resolve initial sync immediately
+        // if Firestore is slow/offline. When its snapshot resolves, it merges properly.
+        const timer = setTimeout(() => {
+          console.log("App: Firestore snapshot timeout reached, proceeding with cached data");
+          setIsInitialSyncDone(true);
+        }, 1200);
+        return () => clearTimeout(timer);
+      }
     }
   }, [isAuthReady, user, isInitialSyncDone]);
 
@@ -267,6 +316,7 @@ export default function App() {
       localStorage.setItem('football_squad', JSON.stringify(squad));
       localStorage.setItem('football_exercises', JSON.stringify(exercises));
       localStorage.setItem('football_sessions', JSON.stringify(sessions));
+      localStorage.setItem('football_deleted_sessions', JSON.stringify(deletedSessions));
       localStorage.setItem('football_lineups', JSON.stringify(lineups));
       localStorage.setItem('active_lineup_id', activeLineupId || '');
       localStorage.setItem('football_periods', JSON.stringify(periods));
@@ -278,9 +328,12 @@ export default function App() {
       localStorage.setItem('custom_formations', JSON.stringify(customFormations));
       localStorage.setItem('training_settings', JSON.stringify(trainingSettings));
       localStorage.setItem('pinned_formations', JSON.stringify(pinnedFormationIds));
-      localStorage.setItem('last_local_sync_at', Date.now().toString());
+      if (sessionActionCount > 0) {
+        localStorage.setItem('last_local_sync_at', Date.now().toString());
+      }
+      localStorage.setItem('last_local_user_id', user ? user.uid : 'guest');
     }
-  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, isAuthReady, isInitialSyncDone]);
 
   // Clear data on user change
   useEffect(() => {
@@ -290,13 +343,16 @@ export default function App() {
         setData(INITIAL_DATA);
         setSessionActionCount(0);
         setIsInitialSyncDone(false);
-        setLastSyncedAt(0);
+        setHasPulledFromCloud(false);
         lastSyncedAtRef.current = 0;
         syncUserIdRef.current = null;
         lastCloudDataRef.current = null;
       }
       setUser(newUser);
       setIsAuthReady(true);
+      if (!newUser) {
+        setHasPulledFromCloud(true);
+      }
     });
     return () => unsubscribe();
   }, [user?.uid]);
@@ -326,15 +382,33 @@ export default function App() {
           return;
         }
 
+        // Skip processing remote snapshots if we have local pending changes to avoid overwriting edits-in-progress.
+        // Once local changes are successfully pushed, the server's update will be applied.
+        // CRITICAL FIX: Only postpone if we have already pulled the cloud state once.
+        // On the very first pull, we MUST let the cloud update (or offline recovery) initialize our state,
+        // otherwise a background call running on mount (such as calendar sync) could lock out the cloud data,
+        // causing a blank/stale state on a new device to overwrite and delete all remote user data!
+        if (sessionActionCountRef.current > 0 && !isFirstPull) {
+          console.log("App: Incoming remote snapshot received, but local changes are pending. Postponing apply to prevent overwrite.");
+          return;
+        }
+
         if (!snapshot.exists()) {
           console.log("App: Cloud is empty.");
           if (isFirstPull) {
             // Migration: Check if we have local data to "claim" for this new cloud account
             const savedSquad = localStorage.getItem('football_squad');
-            if (savedSquad && JSON.parse(savedSquad).length > 0) {
+            const savedSessions = localStorage.getItem('football_sessions');
+            const savedExercises = localStorage.getItem('football_exercises');
+            const savedSettings = localStorage.getItem('training_settings');
+
+            const hasSquad = savedSquad && JSON.parse(savedSquad).length > 0;
+            const hasSessions = savedSessions && JSON.parse(savedSessions).length > 0;
+            const hasExercises = savedExercises && JSON.parse(savedExercises).length > 0;
+            const hasSettings = savedSettings && JSON.parse(savedSettings).icsUrl;
+
+            if (hasSquad || hasSessions || hasExercises || hasSettings) {
               console.log("App: Found local data, migrating to empty cloud");
-              const savedExercises = localStorage.getItem('football_exercises');
-              const savedSessions = localStorage.getItem('football_sessions');
               const savedLineups = localStorage.getItem('football_lineups');
               const savedActiveLineupId = localStorage.getItem('active_lineup_id');
               const savedPeriods = localStorage.getItem('football_periods');
@@ -345,7 +419,7 @@ export default function App() {
               const savedSeriesUrl = localStorage.getItem('series_url');
 
               const newState: CoachData = {
-                squad: JSON.parse(savedSquad),
+                squad: savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [],
                 exercises: savedExercises ? JSON.parse(savedExercises) : [],
                 sessions: savedSessions ? JSON.parse(savedSessions) : [],
                 lineups: savedLineups ? JSON.parse(savedLineups) : [],
@@ -358,13 +432,14 @@ export default function App() {
                 seriesUrl: savedSeriesUrl || '',
                 customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
                 pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-                trainingSettings: localStorage.getItem('training_settings') ? JSON.parse(localStorage.getItem('training_settings')!) : INITIAL_DATA.trainingSettings
+                trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
               };
               setData(newState);
               setSessionActionCount(1); // Force a push of this migrated data
             }
             syncUserIdRef.current = user.uid;
             setIsInitialSyncDone(true);
+            setHasPulledFromCloud(true);
             isFirstPull = false;
           }
           return;
@@ -378,14 +453,25 @@ export default function App() {
         const localSyncAtStr = localStorage.getItem('last_local_sync_at');
         const localSyncAt = localSyncAtStr ? parseInt(localSyncAtStr, 10) : 0;
         const cloudSyncAt = cloudData.updatedAt || 0;
-        const isOfflineDataNewer = isFirstPull && localSyncAt > (cloudSyncAt + 2000);
+        const localUserId = localStorage.getItem('last_local_user_id');
+        // Critical block: Only trigger offline recovery if local state was actually written by the SAME authenticated user.
+        // This prevents empty guest mode or another account's state on a new device from wiping the cloud data!
+        const isOfflineDataNewer = isFirstPull && localUserId === user.uid && localSyncAt > (cloudSyncAt + 2000);
 
         if (isOfflineDataNewer) {
           console.log("App: Offline recovery triggered. Local state in localStorage is newer than Cloud state by " + (localSyncAt - cloudSyncAt) + "ms.");
           const savedSquad = localStorage.getItem('football_squad');
-          if (savedSquad && JSON.parse(savedSquad).length > 0) {
-            const savedExercises = localStorage.getItem('football_exercises');
-            const savedSessions = localStorage.getItem('football_sessions');
+          const savedSessions = localStorage.getItem('football_sessions');
+          const savedDeletedSessions = localStorage.getItem('football_deleted_sessions');
+          const savedExercises = localStorage.getItem('football_exercises');
+          const savedSettings = localStorage.getItem('training_settings');
+
+          const hasSquadOffline = savedSquad && JSON.parse(savedSquad).length > 0;
+          const hasSessionsOffline = savedSessions && JSON.parse(savedSessions).length > 0;
+          const hasExercisesOffline = savedExercises && JSON.parse(savedExercises).length > 0;
+          const hasSettingsOffline = savedSettings && JSON.parse(savedSettings).icsUrl;
+
+          if (hasSquadOffline || hasSessionsOffline || hasExercisesOffline || hasSettingsOffline) {
             const savedLineups = localStorage.getItem('football_lineups');
             const savedActiveLineupId = localStorage.getItem('active_lineup_id');
             const savedPeriods = localStorage.getItem('football_periods');
@@ -396,9 +482,10 @@ export default function App() {
             const savedSeriesUrl = localStorage.getItem('series_url');
 
             const localState: CoachData = {
-              squad: JSON.parse(savedSquad),
+              squad: savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [],
               exercises: savedExercises ? JSON.parse(savedExercises) : [],
               sessions: savedSessions ? JSON.parse(savedSessions) : [],
+              deletedSessions: savedDeletedSessions ? JSON.parse(savedDeletedSessions) : [],
               lineups: savedLineups ? JSON.parse(savedLineups) : [],
               activeLineupId: savedActiveLineupId || null,
               periods: savedPeriods ? JSON.parse(savedPeriods) : [],
@@ -409,7 +496,7 @@ export default function App() {
               seriesUrl: savedSeriesUrl || '',
               customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
               pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-              trainingSettings: localStorage.getItem('training_settings') ? JSON.parse(localStorage.getItem('training_settings')!) : INITIAL_DATA.trainingSettings
+              trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
             };
 
             setData(localState);
@@ -419,6 +506,7 @@ export default function App() {
             
             if (isFirstPull) {
               setIsInitialSyncDone(true);
+              setHasPulledFromCloud(true);
               isFirstPull = false;
             }
             return;
@@ -430,6 +518,7 @@ export default function App() {
           console.log("App: Cloud confirmed our push.");
           if (isFirstPull) {
             setIsInitialSyncDone(true);
+            setHasPulledFromCloud(true);
             isFirstPull = false;
           }
           return;
@@ -439,9 +528,10 @@ export default function App() {
         console.log("App: Applying remote updates from cloud");
         
         const newState: CoachData = {
-          squad: cloudData.squad || [],
+          squad: Array.from(new Map((cloudData.squad || []).map((p: any) => [p.id, p])).values()) as SquadPlayer[],
           exercises: cloudData.exercises || [],
           sessions: cloudData.sessions || [],
+          deletedSessions: cloudData.deletedSessions || [],
           lineups: cloudData.lineups || [],
           activeLineupId: cloudData.activeLineupId || null,
           periods: cloudData.periods || [],
@@ -460,10 +550,12 @@ export default function App() {
         setSessionActionCount(0); // Reset after applying cloud truth
         
         const syncTime = cloudData.updatedAt || Date.now();
-        setLastSyncedAt(syncTime);
         lastSyncedAtRef.current = syncTime;
         syncUserIdRef.current = user.uid;
+        localStorage.setItem('last_local_sync_at', syncTime.toString());
+        localStorage.setItem('last_local_user_id', user.uid);
 
+        setHasPulledFromCloud(true);
         if (isFirstPull) {
           setIsInitialSyncDone(true);
           isFirstPull = false;
@@ -473,6 +565,8 @@ export default function App() {
         if (isQuotaError(error)) {
           setIsQuotaExceeded(true);
         }
+        setIsInitialSyncDone(true); // Don't block the user's dashboard if subscription errors occur
+        setHasPulledFromCloud(true);
       });
 
       return () => unsubscribe();
@@ -481,14 +575,14 @@ export default function App() {
 
   // Push Local Actions to Cloud
   useEffect(() => {
-    if (user && isAuthReady && isInitialSyncDone && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
+    if (user && isAuthReady && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
       // Security: verify current data actually belongs to this user
       if (syncUserIdRef.current !== user.uid) return;
       
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid || isSyncing) return;
         
-        const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
+        const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
         const capturedActionCount = sessionActionCount;
         
         // Skip if current state matches what we last saw from cloud
@@ -510,7 +604,6 @@ export default function App() {
             lastUpdatedBy: sessionIdRef.current
           }, { merge: false }); // Use merge: false to ensure we push the full truth
           
-          setLastSyncedAt(now);
           lastSyncedAtRef.current = now;
           lastCloudDataRef.current = currentState;
           setSessionActionCount(prev => Math.max(0, prev - capturedActionCount)); // Safely subtract only the actions we just successfully wrote
@@ -532,7 +625,7 @@ export default function App() {
       const timeout = setTimeout(syncData, 5000); // 5000ms debounce delay to group rapid changes and save Firestore quota
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, isSyncing, isQuotaExceeded]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded]);
 
   // Sync shared leaderboards globally
   useEffect(() => {
@@ -540,19 +633,6 @@ export default function App() {
       const syncSharedLeaderboards = async () => {
         const sharedPeriods = periods.filter(p => p.shareId);
         if (sharedPeriods.length === 0) return;
-
-        // Gather all guest players from all sessions to include them in leaderboard if they have points
-        const allGuestPlayers = sessions.reduce((acc, s) => {
-          const guests = s.guestPlayers || [];
-          guests.forEach(g => {
-            if (!acc.find(pg => pg.id === g.id)) {
-              acc.push(g);
-            }
-          });
-          return acc;
-        }, [] as SquadPlayer[]);
-
-        const combinedPlayers = [...squad, ...allGuestPlayers];
 
         try {
           for (const period of sharedPeriods) {
@@ -910,11 +990,6 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
-  const handleReorderExercises = (newExercises: Exercise[]) => {
-    setData(prev => ({ ...prev, exercises: newExercises }));
-    setSessionActionCount(prev => prev + 1);
-  };
-
   const onNewSession = () => {
     let endTime = trainingSettings?.defaultEndTime;
     
@@ -944,6 +1019,14 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  const onAddSessionsBatch = (newSessions: TrainingSession[]) => {
+    setData(prev => ({
+      ...prev,
+      sessions: [...newSessions, ...(prev.sessions || [])]
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
   const onUpdateSession = (updatedSession: TrainingSession) => {
     setData(prev => ({
       ...prev,
@@ -953,9 +1036,43 @@ export default function App() {
   };
 
   const onDeleteSession = (id: string) => {
+    setData(prev => {
+      const sessionToDelete = prev.sessions.find(s => s.id === id);
+      const updatedSessions = prev.sessions.filter(s => s.id !== id);
+      const updatedDeleted = sessionToDelete 
+        ? [sessionToDelete, ...(prev.deletedSessions || [])]
+        : (prev.deletedSessions || []);
+      
+      return {
+        ...prev,
+        sessions: updatedSessions,
+        deletedSessions: updatedDeleted
+      };
+    });
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onRestoreSession = (id: string) => {
+    setData(prev => {
+      const restoredSession = (prev.deletedSessions || []).find(s => s.id === id);
+      const updatedDeleted = (prev.deletedSessions || []).filter(s => s.id !== id);
+      const updatedSessions = restoredSession
+        ? [restoredSession, ...prev.sessions]
+        : prev.sessions;
+      
+      return {
+        ...prev,
+        sessions: updatedSessions,
+        deletedSessions: updatedDeleted
+      };
+    });
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const onDeleteSessionPermanent = (id: string) => {
     setData(prev => ({
       ...prev,
-      sessions: prev.sessions.filter(s => s.id !== id)
+      deletedSessions: (prev.deletedSessions || []).filter(s => s.id !== id)
     }));
     setSessionActionCount(prev => prev + 1);
   };
@@ -1012,47 +1129,6 @@ export default function App() {
       };
     });
     setSessionActionCount(prev => prev + 1);
-  };
-
-  const selectExercise = (id: string) => {
-    setData(prev => ({ ...prev, activeExerciseId: id }));
-    setSessionActionCount(prev => prev + 1);
-    setView('exercise');
-  };
-
-  const handleCopyExercise = (id: string) => {
-    setData(prev => {
-      const source = prev.exercises.find(e => e.id === id);
-      if (!source) return prev;
-
-      const now = Date.now();
-      const newExercise: Exercise = {
-        ...source,
-        id: crypto.randomUUID(),
-        name: `${source.name} (kopia)`,
-        date: now,
-        isFinished: false,
-        teams: source.teams.map(t => ({ ...t, id: crypto.randomUUID(), playerIds: [], score: 0 })),
-        jokerPlayerIds: [],
-        createdAt: now,
-        updatedAt: now,
-        periodId: currentPeriodId
-      };
-
-      return {
-        ...prev,
-        exercises: [newExercise, ...prev.exercises]
-      };
-    });
-    setSessionActionCount(prev => prev + 1);
-  };
-
-  const handleEditExercise = (id: string) => {
-    setData(prev => ({ ...prev, activeExerciseId: id }));
-    setSessionActionCount(prev => prev + 1);
-    setEditReturnView(view);
-    setIsEditingActiveExercise(true);
-    setView('setup');
   };
 
   const handleReorderLineups = (reordered: Lineup[]) => {
@@ -1300,6 +1376,55 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  const copyTeams = (sourceExerciseId: string, targetExerciseId: string) => {
+    const LOCAL_VEST_COLORS = [
+      '#1E3A8A', // Navy (Tröjfärg)
+      '#84CC16', // Lime
+      '#0EA5E9', // Sky
+      '#F97316', // Orange
+      '#71717A', // Zinc
+    ];
+
+    setData(prev => {
+      const sourceEx = prev.exercises.find(e => e.id === sourceExerciseId);
+      if (!sourceEx) return prev;
+      return {
+        ...prev,
+        exercises: prev.exercises.map(e => {
+          if (e.id !== targetExerciseId) return e;
+
+          const copiedTeams = e.teams.map((t, idx) => {
+            const sourceTeam = sourceEx.teams[idx];
+            return {
+              ...t,
+              playerIds: sourceTeam ? [...(sourceTeam.playerIds || [])] : []
+            };
+          });
+
+          const finalTeams = [...copiedTeams];
+          if (sourceEx.teams.length > e.teams.length) {
+            const extraTeams = sourceEx.teams.slice(e.teams.length).map((st, idx) => ({
+              id: crypto.randomUUID(),
+              name: `Lag ${e.teams.length + idx + 1}`,
+              color: LOCAL_VEST_COLORS[(e.teams.length + idx) % LOCAL_VEST_COLORS.length] || '#71717A',
+              score: 0,
+              playerIds: [...(st.playerIds || [])]
+            }));
+            finalTeams.push(...extraTeams);
+          }
+
+          return {
+            ...e,
+            teams: finalTeams,
+            jokerPlayerIds: sourceEx.jokerPlayerIds ? [...sourceEx.jokerPlayerIds] : [],
+            updatedAt: Date.now()
+          };
+        })
+      };
+    });
+    setSessionActionCount(prev => prev + 1);
+  };
+
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
 
   const sortedScores = activeExercise ? Array.from(new Set(activeExercise.teams.map(t => t.score))).sort((a: number, b: number) => b - a) : [];
@@ -1335,7 +1460,6 @@ export default function App() {
         updatedAt: now,
         lastUpdatedBy: sessionIdRef.current
       }, { merge: false });
-      setLastSyncedAt(now);
       lastSyncedAtRef.current = now;
       syncUserIdRef.current = user.uid;
       lastCloudDataRef.current = currentState; // Mark as synchronized locally to avoid double push
@@ -1386,7 +1510,6 @@ export default function App() {
         setData(newState);
         syncUserIdRef.current = user.uid;
         setSessionActionCount(0); // Reset after manual pull
-        setLastSyncedAt(cloudData.updatedAt || Date.now());
         lastSyncedAtRef.current = cloudData.updatedAt || Date.now();
         console.log("App: Manual pull successful");
       } else {
@@ -1452,7 +1575,7 @@ export default function App() {
     <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 h-[100dvh] overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
       {view !== 'lineup' && (
         <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 ${view === 'exercise' ? 'sticky top-0' : ''}`}>
-          <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div 
               className={`flex items-center gap-3 cursor-pointer group min-w-0 ${view === 'lineup' ? 'hover:opacity-70' : ''}`}
               onClick={() => { 
@@ -1488,19 +1611,19 @@ export default function App() {
                   {(() => {
                     if (view === 'exercise' && activeExercise) return activeExercise.name;
                     if (view === 'setup') return isEditingActiveExercise ? 'Redigera tävlingsmoment' : 'Skapa tävlingsmoment';
-                    if (view === 'training') return 'Planering';
+                    if (view === 'training') return 'Kalender';
                     if (view === 'squad') return 'Truppen';
                     if (view === 'leaderboard') return 'Topplista';
                     if (view === 'profile') return 'Profil';
                     if (view === 'lineup') return 'Laguppställning';
                     if (view === 'teampage') return 'Lagsidan';
                     if (sharedLeaderboardId) return 'Delad Topplista';
-                    return 'Träning';
+                    return 'Kalender';
                   })()}
                 </span>
                 {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training') && (
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
-                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Träningspass & Tävlingsmoment' : 'Webb & Kalender'}
+                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Kalender & Tävlingsmoment' : 'Webb & Kalender'}
                   </span>
                 )}
               </div>
@@ -1670,11 +1793,11 @@ export default function App() {
                 className="flex-1 flex flex-col items-center justify-center p-8 text-center"
               >
                 <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-6">
-                  <Dribbble size={40} />
+                  <Calendar size={40} />
                 </div>
-                <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-4 tracking-tight">Planera din träning</h2>
+                <h2 className="text-2xl font-black text-zinc-900 dark:text-white mb-4 tracking-tight">Planera din kalender</h2>
                 <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-8 font-medium leading-relaxed">
-                  Här kan du planera dina träningar och skapa tävlingsmoment. Starta appen som ledare genom att gå till den här sidan.
+                  Här kan du planera i kalendern och skapa tävlingsmoment. Starta appen som ledare genom att gå till den här sidan.
                 </p>
                 <button
                   onClick={() => {
@@ -1695,7 +1818,9 @@ export default function App() {
                 <TrainingManager 
                   exercises={exercises} 
                   sessions={sessions}
+                  deletedSessions={deletedSessions}
                   squad={squad}
+                  isCloudDataLoaded={hasPulledFromCloud}
                   activeTab={trainingTab}
                   onTabChange={setTrainingTab}
                   settings={trainingSettings}
@@ -1741,11 +1866,18 @@ export default function App() {
                   }}
                   onNewExercise={() => setView('setup')}
                   onNewSession={onNewSession}
-                  onSelectSession={id => setActiveSessionId(id)}
+                  onAddSessionsBatch={onAddSessionsBatch}
+                  onSelectSession={(id, initialTab) => {
+                    setActiveSessionId(id);
+                    setSessionEditorTab(initialTab || 'schema');
+                  }}
                   onDeleteSession={onDeleteSession}
+                  onRestoreSession={onRestoreSession}
+                  onDeleteSessionPermanent={onDeleteSessionPermanent}
                   onCopySession={handleCopySession}
                   onUpdateSession={onUpdateSession}
                   onMovePlayer={movePlayer}
+                  onCopyTeams={copyTeams}
                   onReorderSessions={(reordered) => {
                     setData(prev => ({ ...prev, sessions: reordered }));
                     setSessionActionCount(prev => prev + 1);
@@ -1774,14 +1906,16 @@ export default function App() {
                 sessionAttendance={currentSession?.attendance}
                 activeSessionId={effectiveSessionId}
                 sessions={sessions}
+                exercises={exercises}
                 currentPeriodId={currentPeriodId}
-                onAddGuest={(name) => {
+                onAddGuest={(name, position) => {
                   if (effectiveSessionId) {
                     const sessionToUpdate = sessions.find(s => s.id === effectiveSessionId);
                     if (sessionToUpdate) {
                       const newGuest = {
                         id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
                         name: name.trim(),
+                        position: position || undefined,
                       };
                       onUpdateSession({
                         ...sessionToUpdate,
@@ -1871,7 +2005,7 @@ export default function App() {
                 </div>
                 
                 <div className="pt-16 pb-8 px-8">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+                  <div className="flex flex-col gap-5 mb-8 border-b border-zinc-100 dark:border-zinc-800 pb-6">
                     <div>
                       <h2 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
                         {user?.displayName || 'Gäst'}
@@ -1881,33 +2015,34 @@ export default function App() {
                         <span>{user?.email}</span>
                       </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3">
+                    
+                    <div className="flex flex-wrap gap-2.5">
                       <button
                         onClick={handleSwitchAccount}
-                        className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-6 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700"
+                        className="flex items-center justify-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-850 dark:text-zinc-200 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-zinc-200 dark:border-zinc-700/60 active:scale-95 transition-all cursor-pointer"
                       >
-                        <RotateCcw size={18} />
+                        <RotateCcw size={15} />
                         <span>Byt konto</span>
                       </button>
                       <button
                         onClick={handleLogout}
-                        className="flex items-center justify-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-6 py-3 rounded-2xl font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30"
+                        className="flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-105/95 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-red-100 dark:border-red-900/30 active:scale-95 transition-all cursor-pointer"
                       >
-                        <LogOut size={18} />
+                        <LogOut size={15} />
                         <span>Logga ut</span>
                       </button>
                       <button
                         onClick={handleManualPull}
-                        className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-2xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-950/40 transition-all border border-indigo-100 dark:border-indigo-950/30"
+                        className="flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100/90 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-indigo-100 dark:border-indigo-950/30 active:scale-95 transition-all cursor-pointer"
                       >
-                        <Cloud size={18} />
+                        <Cloud size={15} />
                         <span>Hämta från molnet</span>
                       </button>
                       <button
                         onClick={handleManualPush}
-                        className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none"
+                        className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold shadow-md hover:shadow-lg active:scale-95 transition-all cursor-pointer"
                       >
-                        <Upload size={18} />
+                        <Upload size={15} />
                         <span>Spara till molnet</span>
                       </button>
                     </div>
@@ -1971,18 +2106,30 @@ export default function App() {
                         <LayoutDashboard size={20} />
                         <h3 className="font-black uppercase tracking-wider text-xs">Statistik</h3>
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-zinc-500">Truppen</span>
-                          <span className="text-sm font-bold">{squad.length} spelare</span>
+                      <div className="space-y-2.5">
+                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
+                          <span className="text-sm text-zinc-500">Spelare i truppen</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{squad.filter(p => p.role !== 'leader').length} st</span>
                         </div>
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
+                          <span className="text-sm text-zinc-500">Ledare</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{squad.filter(p => p.role === 'leader').length} st</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
+                          <span className="text-sm text-zinc-500">Antal träningar</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{sessions.filter(s => getSessionCategory(s) === 'training').length} st</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
+                          <span className="text-sm text-zinc-500">Antal matcher</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{sessions.filter(s => getSessionCategory(s) === 'match').length} st</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
                           <span className="text-sm text-zinc-500">Tävlingsmoment</span>
-                          <span className="text-sm font-bold">{exercises.length} st</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{exercises.length} st</span>
                         </div>
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center pb-0.5">
                           <span className="text-sm text-zinc-500">Perioder</span>
-                          <span className="text-sm font-bold">{periods.length} st</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{periods.length} st</span>
                         </div>
                       </div>
                     </div>
@@ -2104,57 +2251,87 @@ export default function App() {
                 exit={{ opacity: 0 }}
                 className="max-w-7xl mx-auto w-full h-full flex flex-col p-2 sm:p-4 overflow-hidden"
               >
-              {activeExercise.showTimer && (
-                <div className="mb-4 sm:mb-6 shrink-0 flex flex-col items-center gap-4">
-                  <div className="flex flex-wrap justify-center gap-2">
-                    {activeExercise.jokerPlayerIds && activeExercise.jokerPlayerIds.length > 0 && (
-                      <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shadow-sm">
-                        <Zap size={14} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
-                        <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Jokrar:</span>
-                        <div className="flex gap-1">
-                        {Array.from(new Set(activeExercise.jokerPlayerIds || [])).map(id => {
-                          const player = squad.find(p => p.id === id);
+              {(() => {
+                const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
+                const guestsForExercise = exerciseSession?.guestPlayers || [];
+                const combinedExerciseSquad = [...squad, ...guestsForExercise];
+                const jokers = Array.from(new Set(activeExercise.jokerPlayerIds || []));
+                
+                return (
+                  <div className="mb-4 sm:mb-6 shrink-0 flex flex-col items-center gap-4">
+                    {activeExercise.showTimer && (
+                      <div className="w-full max-w-sm">
+                        <Timer 
+                          defaultMinutes={activeExercise.defaultTimerMinutes} 
+                          defaultSeconds={activeExercise.defaultTimerSeconds} 
+                          onSaveDefault={updateActiveExerciseDefaultTimer}
+                        />
+                      </div>
+                    )}
+
+                    {/* Neat and small Joker badge/drop-zone */}
+                    <div 
+                      data-team-id="joker"
+                      className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl border transition-all duration-300 ${
+                        draggedPlayerId 
+                          ? 'bg-indigo-100/40 dark:bg-indigo-950/40 border-dashed border-indigo-400 dark:border-indigo-500 scale-105 animate-pulse shadow-md'
+                          : 'bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-100/80 dark:border-indigo-900/40'
+                      }`}
+                    >
+                      <Zap size={13} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
+                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                        Jokrar:
+                      </span>
+                      
+                      <div className="flex flex-wrap gap-1 items-center min-h-[22px]">
+                        {(jokers as string[]).map((id: string) => {
+                          const player = combinedExerciseSquad.find(p => p.id === id);
+                          if (!player) return null;
                           return (
-                            <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
-                              {player?.name}
-                            </span>
+                            <motion.span
+                              key={id}
+                              drag
+                              dragSnapToOrigin
+                              onDragStart={() => setDraggedPlayerId(id)}
+                              onDragEnd={(e: any, info) => {
+                                setDraggedPlayerId(null);
+                                const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                                const x = point.clientX || point.x;
+                                const y = point.clientY || point.y;
+                                const elements = document.elementsFromPoint(x, y);
+                                const teamElement = elements
+                                  .map(el => (el as HTMLElement).closest?.('[data-team-id]'))
+                                  .find(te => te && te.getAttribute('data-team-id') !== 'joker');
+
+                                if (teamElement) {
+                                  const targetTeamId = teamElement.getAttribute('data-team-id');
+                                  if (targetTeamId) {
+                                    movePlayer(activeExercise.id, id, targetTeamId);
+                                  }
+                                }
+                              }}
+                              whileTap={{ scale: 0.95 }}
+                              whileDrag={{
+                                zIndex: 9999,
+                                scale: 1.1,
+                                pointerEvents: 'none'
+                              }}
+                              className="text-[10px] font-black text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded-md cursor-grab active:cursor-grabbing touch-none z-50 shadow-sm"
+                            >
+                              {player.name}
+                            </motion.span>
                           );
                         })}
+                        {jokers.length === 0 && (
+                          <span className="text-[9px] text-indigo-400/80 dark:text-indigo-500/80 font-semibold uppercase tracking-wider pointer-events-none px-1">
+                            Släpp spelare här för Joker
+                          </span>
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
-                <div className="w-full max-w-sm">
-                  <Timer 
-                    defaultMinutes={activeExercise.defaultTimerMinutes} 
-                    defaultSeconds={activeExercise.defaultTimerSeconds} 
-                    onSaveDefault={updateActiveExerciseDefaultTimer}
-                  />
-                </div>
-              </div>
-            )}
-
-            {!activeExercise.showTimer && activeExercise.jokerPlayerIds && activeExercise.jokerPlayerIds.length > 0 && (
-              <div className="mb-6 flex justify-center flex-wrap gap-2">
-                <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shadow-sm">
-                  <Zap size={14} className="text-indigo-600 dark:text-indigo-400" fill="currentColor" />
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Jokrar:</span>
-                  <div className="flex gap-1">
-                    {Array.from(new Set(activeExercise.jokerPlayerIds || [])).map(id => {
-                      const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
-                      const guestsForExercise = exerciseSession?.guestPlayers || [];
-                      const combinedExerciseSquad = [...squad, ...guestsForExercise];
-                      const player = combinedExerciseSquad.find(p => p.id === id);
-                      return (
-                        <span key={id} className="text-[10px] font-black text-zinc-700 dark:text-zinc-300">
-                          {player?.name}
-                        </span>
-                      );
-                    })}
                   </div>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               <div className={`flex-1 flex flex-col gap-2 sm:gap-3 min-h-0 w-full max-w-2xl mx-auto ${activeExercise.teams.length > 5 ? 'overflow-y-auto' : 'overflow-hidden sm:overflow-y-auto'}`}>
                 <AnimatePresence mode="popLayout">
@@ -2208,7 +2385,7 @@ export default function App() {
                   onClick={() => setView('training')}
                   className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
                 >
-                  Gå tillbaka till träning
+                  Gå tillbaka till kalendern
                 </button>
               </div>
             )
@@ -2224,8 +2401,8 @@ export default function App() {
               onClick={() => setView('training')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'training' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <Dribbble size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Träning</span>
+              <Calendar size={24} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Kalender</span>
             </button>
             <button
               onClick={() => setView('leaderboard')}
@@ -2267,6 +2444,8 @@ export default function App() {
             attendingIds={sessions.find(s => s.id === activeExercise.sessionId)?.attendance}
             onMovePlayer={movePlayer}
             onClose={() => setShowTeamOverview(false)}
+            exercises={data.exercises}
+            onCopyTeams={(sourceId) => copyTeams(sourceId, activeExercise.id)}
           />
         )}
       </AnimatePresence>
@@ -2278,10 +2457,14 @@ export default function App() {
             session={sessions.find(s => s.id === activeSessionId)!}
             exercises={exercises}
             squad={squad}
-            onUpdate={onUpdateSession}
+            onUpdate={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
+            allSessions={sessions}
+            onUpdateSession={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
             initialMode={sessionMode}
             onModeChange={setSessionMode}
             onMovePlayer={movePlayer}
+            onCopyTeams={copyTeams}
+            initialTab={sessionEditorTab}
             onClose={() => {
               setActiveSessionId(null);
               setLinkToMomentId(null);

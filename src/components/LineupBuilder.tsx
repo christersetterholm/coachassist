@@ -3,18 +3,17 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { toPng } from 'html-to-image';
 // import html2canvas from 'html-to-image'; // Removed
 import Cropper, { Area, Point } from 'react-easy-crop';
-import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition } from '../types';
+import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Share2, ClipboardList, Camera, Check, Crosshair, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Circle, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, MousePointer2, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
 import ColorPicker from './ColorPicker';
 
-import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage } from '../lib/firebase';
+import { storage } from '../lib/firebase';
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -181,10 +180,15 @@ export default function LineupBuilder({
 
   const [lineupName, setLineupName] = useState(lineup?.matchTitle || '');
   const [teamName, setTeamName] = useState(lineup?.teamName || '');
+  
+  // Exclude leaders (role === 'leader') from lineup building and drawing boards
+  const squadPlayers = React.useMemo(() => {
+    return squad.filter(p => p.role !== 'leader');
+  }, [squad]);
   const [players, setPlayers] = useState<LineupPlayer[]>(lineup?.players || []);
   const [playerScale, setPlayerScale] = useState(lineup?.playerScale || 1);
   const [nameTagStyle, setNameTagStyle] = useState<'light' | 'dark'>(lineup?.nameTagStyle || 'light');
-  const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full' | 'initials'>(lineup?.nameDisplayMode || 'first');
+  const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full' | 'initials' | 'firstLastInitial' | 'initialLastName'>(lineup?.nameDisplayMode || 'first');
   const [showNameBackground, setShowNameBackground] = useState(lineup?.showNameBackground ?? true);
   const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal'>(lineup?.nameBackgroundType || 'classic');
   const [showPhoto, setShowPhoto] = useState(lineup?.showPhoto ?? true);
@@ -244,7 +248,6 @@ export default function LineupBuilder({
 
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [selectedForEdit, setSelectedForEdit] = useState<string | null>(null); // LineupPlayer id
   const [pickerMode, setPickerMode] = useState<'starter' | 'sub' | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -258,14 +261,14 @@ export default function LineupBuilder({
   const [showSavedLineups, setShowSavedLineups] = useState(true);
   const [showBenchMaximized, setShowBenchMaximized] = useState(false);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
+  const [showTacticalSavedBoardsModal, setShowTacticalSavedBoardsModal] = useState(false);
+  const [newSavedBoardName, setNewSavedBoardName] = useState('');
   const dragControls = useDragControls();
-  const markerSuffix = useMemo(() => Math.random().toString(36).substr(2, 5), []);
-  const sessionToken = useMemo(() => Math.random().toString(36).substring(7), []);
+  const markerSuffix = useMemo(() => Math.random().toString(36).substring(2, 7), []);
 
   // Tactical Board State
   const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle'>('pen');
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const [circleStart, setCircleStart] = useState<{ x: number, y: number } | null>(null);
   const [pitchAspectRatio, setPitchAspectRatio] = useState(1);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [isTransforming, setIsTransforming] = useState<'move' | 'resize' | null>(null);
@@ -309,6 +312,13 @@ export default function LineupBuilder({
       return prevList;
     });
   }, [isMaximized, players]);
+
+  // Whenever entering rittavlan/maximized mode, copy the current lineup's player positions to the tactical players
+  useEffect(() => {
+    if (isMaximized) {
+      setTacticalPlayers(players.map(p => ({ ...p })));
+    }
+  }, [isMaximized]);
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
@@ -401,12 +411,10 @@ export default function LineupBuilder({
   const [showOpponentFormationModal, setShowOpponentFormationModal] = useState(false);
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
-  const [tempFormation, setTempFormation] = useState<any | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lineupHistories, setLineupHistories] = useState<Record<string, any[]>>({});
   const [lineupFutures, setLineupFutures] = useState<Record<string, any[]>>({});
   const isRestoringHistory = useRef(false);
-  const skipHistoryRemoteUpdate = useRef(false);
   // Sync local state when lineup prop changes (remote updates)
   useEffect(() => {
     if (!lineup) return;
@@ -441,7 +449,11 @@ export default function LineupBuilder({
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
-      setTacticalPlayers(lineup.tacticalBoard?.players || []);
+      setTacticalPlayers(
+        isMaximized 
+          ? (lineup.players || []).map(p => ({ ...p }))
+          : (lineup.tacticalBoard?.players || [])
+      );
       
       // Deduplicate players by ID
       const deduplicatedPlayers = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
@@ -672,8 +684,6 @@ export default function LineupBuilder({
         const draw = tacticalDrawings.find(d => d.id === selectedDrawingId);
         if (draw) {
           if (draw.type === 'circle') {
-             const rx = Math.hypot(draw.points[0].x - draw.points[1].x, draw.points[0].y - draw.points[1].y);
-             const ry = rx * pitchAspectRatio;
              // Resize handle check (near the bottom right of the "bounding box" or edge)
              const dist = Math.hypot(draw.points[1].x - x, draw.points[1].y - y);
              if (dist < 5) {
@@ -1048,9 +1058,6 @@ export default function LineupBuilder({
       setIsExporting(false);
     }
   }, [lineupName, teamName, exportFormat]);
-
-  // Status state for better persistence indicators
-  const [isSyncingToParent, setIsSyncingToParent] = useState(false);
 
   // Use refs for dragging to keep event listeners stable and avoid re-binding performance hits
   const dragInfoRef = useRef<{ id: string; x: number; y: number; hoveredId: string | null } | null>(null);
@@ -1502,11 +1509,16 @@ export default function LineupBuilder({
 
     const newPlayers = [...players];
     
-    // Position GK (always central bottom)
+    // Position GK (either from variant.gkPosition or default central bottom)
     const gkInNew = newPlayers.find(p => p.id === gk.id);
     if (gkInNew) {
-      gkInNew.x = 50;
-      gkInNew.y = 94;
+      if (variant.gkPosition) {
+        gkInNew.x = variant.gkPosition.x;
+        gkInNew.y = variant.gkPosition.y;
+      } else {
+        gkInNew.x = 50;
+        gkInNew.y = 94;
+      }
     }
 
     // Position others based on variant positions
@@ -1531,13 +1543,20 @@ export default function LineupBuilder({
     // Create exactly 11 opponent circles
     const newOpponents: { id: string, x: number, y: number }[] = [];
     
-    // 1. Goalkeeper (Opponent's perspective: central top)
-    // Home team GK is at (50, 94), so opponent GK is at (50, 6)
-    newOpponents.push({
-      id: Math.random().toString(36).substr(2, 9),
-      x: 50,
-      y: 6 
-    });
+    // 1. Goalkeeper (Opponent's perspective: flipped according to custom formation if defined, else central top)
+    if (variant.gkPosition) {
+      newOpponents.push({
+        id: Math.random().toString(36).substr(2, 9),
+        x: 100 - variant.gkPosition.x,
+        y: 100 - variant.gkPosition.y
+      });
+    } else {
+      newOpponents.push({
+        id: Math.random().toString(36).substr(2, 9),
+        x: 50,
+        y: 6 
+      });
+    }
 
     // 2. Outfield players (Flipped coordinates)
     variant.positions.forEach(pos => {
@@ -1621,6 +1640,7 @@ export default function LineupBuilder({
       return curr.y > prev.y ? currIdx : prevIdx;
     }, 0);
 
+    const gk = onField[gkIndex];
     const outfield = onField.filter((_, idx) => idx !== gkIndex);
     
     // Sort outfield for consistency (optional)
@@ -1634,13 +1654,71 @@ export default function LineupBuilder({
       id: crypto.randomUUID(),
       name: newFormationName.trim(),
       description: `Egen formation skapad ${new Date().toLocaleDateString('sv-SE')}`,
-      positions: outfield.map(p => ({ x: p.x, y: p.y }))
+      positions: outfield.map(p => ({ x: p.x, y: p.y })),
+      gkPosition: { x: gk.x, y: gk.y }
     };
 
     onSaveCustomFormation(newFormation);
     setNewFormationName('');
     setShowSaveFormation(false);
     setCurrentFormation(newFormation.name);
+    setHasUnsavedChanges(true);
+  };
+
+  // Save the current tactical board state as a named preset
+  const handleSaveTacticalBoard = () => {
+    if (!newSavedBoardName.trim()) return;
+    
+    const newBoard: TacticalSavedBoard = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: newSavedBoardName.trim(),
+      createdAt: Date.now(),
+      drawings: JSON.parse(JSON.stringify(tacticalDrawings)),
+      opponents: JSON.parse(JSON.stringify(opponents)),
+      players: JSON.parse(JSON.stringify(tacticalPlayers)),
+      footballPos: footballPos ? { ...footballPos } : null,
+      footballScale,
+      showOpponents,
+      opponentColor,
+      pitchType,
+    };
+
+    const currentSaved = lineup.savedTacticalBoards || [];
+    const updatedLineup = {
+      ...lineup,
+      savedTacticalBoards: [newBoard, ...currentSaved]
+    };
+
+    onUpdateLineup(updatedLineup);
+    setNewSavedBoardName('');
+    setHasUnsavedChanges(true);
+  };
+
+  // Load a saved tactical board preset
+  const handleLoadTacticalBoard = (board: TacticalSavedBoard) => {
+    pushHistory();
+    setTacticalDrawings(JSON.parse(JSON.stringify(board.drawings || [])));
+    setOpponents(JSON.parse(JSON.stringify(board.opponents || [])));
+    setTacticalPlayers(JSON.parse(JSON.stringify(board.players || [])));
+    setFootballPos(board.footballPos ? { ...board.footballPos } : null);
+    if (board.footballScale !== undefined) setFootballScale(board.footballScale);
+    setShowOpponents(board.showOpponents ?? true);
+    if (board.opponentColor) setOpponentColor(board.opponentColor);
+    if (board.pitchType) setPitchType(board.pitchType as any);
+    
+    setHasUnsavedChanges(true);
+    setShowTacticalSavedBoardsModal(false);
+  };
+
+  // Delete a saved tactical board preset
+  const handleDeleteTacticalBoard = (boardId: string) => {
+    const currentSaved = lineup.savedTacticalBoards || [];
+    const updatedLineup = {
+      ...lineup,
+      savedTacticalBoards: currentSaved.filter(b => b.id !== boardId)
+    };
+
+    onUpdateLineup(updatedLineup);
     setHasUnsavedChanges(true);
   };
 
@@ -1666,7 +1744,7 @@ export default function LineupBuilder({
     setIsEditingTitle(true);
   };
 
-  const onCropComplete = (croppedArea: Area, croppedAreaPixels: Area) => {
+  const onCropComplete = (_croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   };
 
@@ -1756,11 +1834,11 @@ export default function LineupBuilder({
 
     namesToFind.forEach(name => {
       // Try exact match first
-      let match = squad.find(s => s.name.toLowerCase() === name.toLowerCase());
+      let match = squadPlayers.find(s => s.name.toLowerCase() === name.toLowerCase());
       
       // Try partial match if no exact match
       if (!match) {
-        match = squad.find(s => 
+        match = squadPlayers.find(s => 
           s.name.toLowerCase().includes(name.toLowerCase()) || 
           name.toLowerCase().includes(s.name.toLowerCase())
         );
@@ -1827,17 +1905,6 @@ export default function LineupBuilder({
     setHasUnsavedChanges(true);
   };
 
-  const updatePlayerPosition = (id: string, x: number, y: number) => {
-    pushHistory();
-    setActivePlayers((prev: LineupPlayer[]) => prev.map(p => {
-      if (p.id === id) {
-        return { ...p, x, y };
-      }
-      return p;
-    }));
-    setHasUnsavedChanges(true);
-  };
-
   const toggleSubstitute = (id: string) => {
     pushHistory();
     setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
@@ -1879,10 +1946,20 @@ export default function LineupBuilder({
       const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
       return `${first}.${last}`.toUpperCase();
     }
+    if (nameDisplayMode === 'firstLastInitial') {
+      const first = parts[0] || '';
+      const lastInitial = parts.length > 1 ? ` ${parts[parts.length - 1]?.[0] || ''}.` : '';
+      return `${first}${lastInitial}`;
+    }
+    if (nameDisplayMode === 'initialLastName') {
+      const firstInitial = parts[0]?.[0] ? `${parts[0][0]}. ` : '';
+      const last = parts.length > 1 ? parts[parts.length - 1] : '';
+      return last ? `${firstInitial}${last}` : (parts[0] || '');
+    }
     return fullName;
   };
 
-  const getSquadPlayer = (id: string) => squad.find(s => s.id === id);
+  const getSquadPlayer = (id: string) => squadPlayers.find(s => s.id === id);
 
   const calculateBestSpawnPosition = useCallback((currentPlayers: LineupPlayer[]) => {
     const corners = [
@@ -1922,7 +1999,7 @@ export default function LineupBuilder({
     const uniquePlayerIds = new Set<string>();
     return activePlayers.filter(p => {
       // Must be in squad
-      if (!squad.some(s => s.id === p.playerId)) return false;
+      if (!squadPlayers.some(s => s.id === p.playerId)) return false;
       // Must have unique instance ID to avoid map key collisions
       if (uniqueIds.has(p.id)) return false;
       // Also preserve "one per squad player" rule for UI logic
@@ -1938,10 +2015,6 @@ export default function LineupBuilder({
   const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
 
   const renderLineupContent = (isSimplified: boolean = false, customRef?: React.Ref<HTMLDivElement>) => {
-    // Determine sizing based on context
-    const isExportMode = !isSimplified && !isMaximized;
-    const isMobileExport = (exportFormat === 'mobile' || (exportFormat === 'responsive' && typeof window !== 'undefined' && window.innerWidth < 640)) && isSimplified;
-
     // Standard international dimension ratios (105 x 68 meters)
     const pitchRatioW = 68;
     const pitchRatioH = 105;
@@ -2226,7 +2299,7 @@ export default function LineupBuilder({
 
           {/* The Football Pitch */}
           <div 
-            className={`football-pitch relative rounded-[32px] sm:rounded-[40px] overflow-hidden border-[6px] sm:border-[8px] border-white/20 shadow-2xl transition-all duration-500 ${isMaximized ? 'mb-0' : 'mb-6'} ${
+            className={`football-pitch relative rounded-[32px] sm:rounded-[40px] overflow-hidden border-[6px] sm:border-[8px] border-white/20 shadow-2xl transition-all duration-500 ${isMaximized ? 'mb-0' : 'mb-3'} ${
               orientation === 'landscape'
                 ? `aspect-[105/68] w-auto h-auto mx-auto ${
                     isMaximized 
@@ -2506,7 +2579,7 @@ export default function LineupBuilder({
               onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
               onPointerUp={isSimplified ? undefined : clearLongPress}
               onPointerCancel={isSimplified ? undefined : clearLongPress}
-              onPointerMove={isSimplified ? undefined : (e) => {
+              onPointerMove={isSimplified ? undefined : () => {
                 if (draggingOpponentId === opp.id) {
                   clearLongPress();
                 }
@@ -2537,7 +2610,7 @@ export default function LineupBuilder({
               onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball')}
               onPointerUp={isSimplified ? undefined : clearLongPress}
               onPointerCancel={isSimplified ? undefined : clearLongPress}
-              onPointerMove={isSimplified ? undefined : (e) => {
+              onPointerMove={isSimplified ? undefined : () => {
                 if (draggingBall) {
                   clearLongPress();
                 }
@@ -2732,22 +2805,27 @@ export default function LineupBuilder({
                           opacity: isDragging ? 0.3 : 1,
                         }}
                       >
-                        {getVisibleName(sp.name).split(' ').map((part, i) => (
-                          <div 
-                            key={i} 
-                            className={`truncate ${
-                              hoveredPlayerId === p.id ? 'text-white' : (
-                                nameBackgroundType === 'solid' ? (
-                                  `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
-                                ) : 
-                                (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
-                                (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
-                              )
-                            }`}
-                          >
-                            {part}
-                          </div>
-                        ))}
+                        {(() => {
+                          const displayName = getVisibleName(sp.name);
+                          const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                          const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                          return parts.map((part, i) => (
+                            <div 
+                              key={i} 
+                              className={`truncate whitespace-nowrap ${
+                                hoveredPlayerId === p.id ? 'text-white' : (
+                                  nameBackgroundType === 'solid' ? (
+                                    `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
+                                  ) : 
+                                  (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
+                                  (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
+                                )
+                              }`}
+                            >
+                              {part}
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2916,9 +2994,14 @@ export default function LineupBuilder({
                           marginTop: `${0.4 * playerScale}rem`
                         }}
                       >
-                        {getVisibleName(sp.name).split(' ').map((part, i) => (
-                          <div key={i} className="truncate">{part}</div>
-                        ))}
+                        {(() => {
+                          const displayName = getVisibleName(sp.name);
+                          const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                          const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                          return parts.map((part, i) => (
+                            <div key={i} className="truncate whitespace-nowrap">{part}</div>
+                          ));
+                        })()}
                       </div>
                     </Reorder.Item>
                   );
@@ -2976,6 +3059,17 @@ export default function LineupBuilder({
               title="Anteckningar"
             >
               <ClipboardList size={16} />
+            </button>
+            <button
+              onClick={() => setShowTacticalSavedBoardsModal(true)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
+                showTacticalSavedBoardsModal 
+                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700' 
+                  : 'bg-emerald-600/10 text-emerald-650 hover:bg-emerald-600/20 border-emerald-500/35'
+              }`}
+              title="Spara / Öppna rittavlor"
+            >
+              <Bookmark size={16} />
             </button>
             <button
               onClick={() => {
@@ -3668,14 +3762,6 @@ export default function LineupBuilder({
                               
                               if (positions.length > 0) {
                                 setNewFormationName('');
-                                setTempFormation({
-                                  id: crypto.randomUUID(),
-                                  name: "Min layout",
-                                  variants: [{
-                                    name: "Min layout",
-                                    positions
-                                  }]
-                                });
                                 setShowSaveFormation(true);
                               }
                             }}
@@ -4138,25 +4224,33 @@ export default function LineupBuilder({
               </div>
 
               {/* Name Mode */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 col-span-2 md:col-span-2 lg:col-span-3">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnformat</span>
-                <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                   <button onClick={() => {
                     setNameDisplayMode('first');
                     setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>För</button>
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Förnamn</button>
                   <button onClick={() => {
                     setNameDisplayMode('last');
                     setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Efter</button>
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Efternamn</button>
                   <button onClick={() => {
                     setNameDisplayMode('full');
                     setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Hela</button>
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Hela namnet</button>
                   <button onClick={() => {
                     setNameDisplayMode('initials');
                     setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Initialer</button>
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Initialer</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('firstLastInitial');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'firstLastInitial' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Namn + I.</button>
+                  <button onClick={() => {
+                    setNameDisplayMode('initialLastName');
+                    setHasUnsavedChanges(true);
+                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initialLastName' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>I. + Efternamn</button>
                 </div>
               </div>
 
@@ -4792,6 +4886,105 @@ export default function LineupBuilder({
           </motion.div>
         )}
 
+        {/** Tactical Saved Boards Modal (Spara / Öppna rittavlor) */}
+        {showTacticalSavedBoardsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4 font-sans"
+            onClick={() => setShowTacticalSavedBoardsModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Taktiska ritningar</h3>
+                  <p className="text-sm text-zinc-500 font-medium mt-1">Spara och ladda dina anpassade rittavlor manuellt.</p>
+                </div>
+                <button 
+                  onClick={() => setShowTacticalSavedBoardsModal(false)} 
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-sm transition-transform active:scale-95"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* SECTION: Save current view */}
+              <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm mb-6">
+                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3">Spara aktuell rittavla</h4>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={newSavedBoardName}
+                    onChange={(e) => setNewSavedBoardName(e.target.value)}
+                    placeholder="Namnge ritningen (t.ex. Hörnvariant A)..."
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                  />
+                  <button
+                    onClick={handleSaveTacticalBoard}
+                    disabled={!newSavedBoardName.trim()}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-600/10 flex items-center justify-center gap-1.5 transition-all active:scale-95 pr-5 pointer-events-auto"
+                  >
+                    <Save size={16} />
+                    Spara
+                  </button>
+                </div>
+              </div>
+
+              {/* SECTION: Saved presets list */}
+              <div>
+                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3 block">Sparade ritningar</h4>
+                {(!lineup || !lineup.savedTacticalBoards || lineup.savedTacticalBoards.length === 0) ? (
+                  <div className="text-center py-8 text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl">
+                    <Bookmark className="mx-auto mb-2 opacity-30" size={32} />
+                    <p className="text-xs font-semibold">Inga sparade rittavlor ännu.</p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">Skriv ett namn ovan för att spara din första ritning.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {lineup.savedTacticalBoards.map((board) => (
+                      <div 
+                        key={board.id} 
+                        className="flex items-center justify-between p-3.5 sm:p-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/80 rounded-2xl hover:border-emerald-500/30 transition-all shadow-sm group"
+                      >
+                        <div className="flex-1 min-w-0 pr-2">
+                          <p className="text-sm font-black text-zinc-800 dark:text-zinc-200 truncate">{board.name}</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">
+                            Sparad {new Date(board.createdAt).toLocaleDateString('sv-SE')} kl. {new Date(board.createdAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 pointer-events-auto">
+                          <button
+                            onClick={() => handleLoadTacticalBoard(board)}
+                            className="px-3 py-1.5 bg-emerald-600/15 text-emerald-650 hover:bg-emerald-600 hover:text-white text-xs font-black rounded-lg transition-all active:scale-90 flex items-center gap-1"
+                          >
+                            <FolderOpen size={12} />
+                            Öppna
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTacticalBoard(board.id)}
+                            className="p-1.5 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all active:scale-90"
+                            title="Ta bort sparad ritning"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+            </motion.div>
+          </motion.div>
+        )}
+
         {/** Opponent Formation Modal */}
         {showOpponentFormationModal && (
           <motion.div
@@ -5198,7 +5391,7 @@ export default function LineupBuilder({
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                    {Array.from(new Map(squad.map(sp => [sp.id, sp])).values()).map(sp => {
+                    {(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values()) as SquadPlayer[]).map(sp => {
                       const itemInLineup = players.find(p => p.playerId === sp.id);
                       const isCurrentMode = itemInLineup && (
                         (pickerMode === 'starter' && !itemInLineup.isSubstitute) ||
@@ -5317,7 +5510,7 @@ export default function LineupBuilder({
                 </button>
               </div>
 
-              {squad.length === 0 && (
+              {squadPlayers.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-sm text-zinc-500 mb-4">Inga spelare i truppen än.</p>
                 </div>
@@ -5370,7 +5563,7 @@ export default function LineupBuilder({
                             type="text" 
                             className="hidden" 
                             onBlur={(e) => updateSquadPlayerInfo(sp.id, { photoUrl: (e.target as any).value })}
-                            onChange={(e) => {
+                            onChange={() => {
                               const url = prompt("Klistra in länk till bild:", sp.photoUrl);
                               if (url !== null) updateSquadPlayerInfo(sp.id, { photoUrl: url });
                             }}

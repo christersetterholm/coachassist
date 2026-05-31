@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Timer as TimerIcon, Bell, BellOff, Plus, Minus, Check, X, Save } from 'lucide-react';
+import { Play, Pause, RotateCcw, Bell, BellOff, Plus, Minus, Check, X, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TimerProps {
@@ -75,7 +75,6 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
   }, [defaultMinutes, defaultSeconds, isStarted]);
 
   const totalSeconds = minutes * 60 + seconds;
-  const totalPresetSeconds = presetMinutes * 60 + presetSeconds;
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const alarmIntervalRef = useRef<number | null>(null);
@@ -394,8 +393,6 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
   const formatTime = (m: number, s: number) => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
-
-  const progress = totalPresetSeconds > 0 ? (totalSeconds / totalPresetSeconds) * 100 : 0;
 
   return (
     <div className={`bg-white dark:bg-zinc-900 rounded-3xl p-3 sm:p-4 border-2 transition-all duration-300 shadow-xl ${

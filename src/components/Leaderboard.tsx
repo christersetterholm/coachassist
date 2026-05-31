@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Calendar, Share2, Crown, Star, Medal, ChevronDown, ChevronUp, Eye, EyeOff, Plus, Lock, Trash2, Loader2, ExternalLink, Edit2, Check, User } from 'lucide-react';
+import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
 import { db } from '../lib/firebase';
@@ -30,7 +30,7 @@ export default function Leaderboard({
   periods, 
   currentPeriodId, 
   onClosePeriod, 
-  onStartNewPeriod, 
+  onStartNewPeriod: _onStartNewPeriod, 
   onDeletePeriod,
   onCreatePeriod,
   onSwitchPeriod,
@@ -329,7 +329,7 @@ export default function Leaderboard({
 
   const getSubtitle = (player: any) => {
     if (player.history && player.history.length > 0) {
-      return `${player.history.length} tävlingsmoment med poäng`;
+      return `${player.history.length} tävlingsmoment`;
     }
     if (sharedId) {
       return 'Inga poäng registrerade';
@@ -339,7 +339,7 @@ export default function Leaderboard({
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-32">
+    <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32">
       <div className="flex flex-col mb-8 gap-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -420,6 +420,19 @@ export default function Leaderboard({
                   >
                     <Lock size={18} />
                     <span>Avsluta</span>
+                  </button>
+                )}
+                {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
+                  <button
+                    onClick={() => {
+                      setBonusData({ playerId: '', points: 1, reason: '' });
+                      setShowBonusModal(true);
+                    }}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-sm text-sm"
+                    title="Ge bonuspoäng"
+                  >
+                    <Star size={18} fill="currentColor" />
+                    <span>Bonuspoäng</span>
                   </button>
                 )}
                 {selectedPeriodId !== 'current' && (
@@ -511,19 +524,6 @@ export default function Leaderboard({
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  {!sharedId && !periods.find(p => p.id === selectedPeriodId)?.endDate && selectedPeriodId !== 'current' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setBonusData({ playerId: player.id, points: 1, reason: '' });
-                        setShowBonusModal(true);
-                      }}
-                      className="w-8 h-8 flex items-center justify-center bg-amber-50 dark:bg-amber-900/20 text-amber-500 rounded-lg hover:bg-amber-100 transition-all shadow-sm active:scale-95"
-                      title="Ge bonuspoäng"
-                    >
-                      <Star size={16} fill="currentColor" />
-                    </button>
-                  )}
                   <div className="text-right">
                     <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
                       {player.totalPoints}
@@ -548,7 +548,7 @@ export default function Leaderboard({
                   >
                     <div className="bg-zinc-50 dark:bg-zinc-950/50 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800">
                       <div className="flex flex-wrap gap-x-6 gap-y-3">
-                        {player.history.map((h, i) => (
+                        {player.history.map((h) => (
                             <div className="flex items-center group relative overflow-hidden">
                               <div className="flex flex-col gap-0.5">
                                 <span className="text-[10px] font-bold text-zinc-400 uppercase">
@@ -823,10 +823,26 @@ export default function Leaderboard({
               </div>
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Ge bonuspoäng</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
-                Ge extra poäng till <span className="text-zinc-900 dark:text-white font-bold">{squad.find(p => p.id === bonusData.playerId)?.name}</span> för t.ex. bra inställning eller extra prestation.
+                Välj en spelare och ge extra poäng för t.ex. bra inställning eller extra prestation.
               </p>
               
               <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Välj spelare</label>
+                  <select
+                    value={bonusData.playerId}
+                    onChange={(e) => setBonusData(prev => ({ ...prev, playerId: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all font-bold text-sm cursor-pointer"
+                  >
+                    <option value="">Välj en spelare...</option>
+                    {[...squad].filter(p => p.role !== 'leader').sort((a, b) => a.name.localeCompare(b.name)).map(player => (
+                      <option key={player.id} value={player.id}>
+                        {player.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Anledning</label>
                   <input
@@ -861,7 +877,7 @@ export default function Leaderboard({
                 <div className="flex flex-col gap-3 pt-2">
                   <button
                     onClick={handleBonusConfirm}
-                    disabled={!bonusData.reason.trim()}
+                    disabled={!bonusData.playerId || !bonusData.reason.trim()}
                     className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
                   >
                     Ge bonuspoäng

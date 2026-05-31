@@ -29,7 +29,8 @@ export function calculateLeaderboard(
   });
 
   // Calculate total points for each player based on relevant exercises
-  return squad.filter(p => !p.id.startsWith('guest_')).map(player => {
+  const uniqueSquad = Array.from(new Map(squad.map(p => [p.id, p])).values());
+  return uniqueSquad.filter(p => !p.id.startsWith('guest_') && p.role !== 'leader').map(player => {
     const history: { date: number; exerciseName: string; points: number; isBonus?: boolean }[] = [];
     let totalPoints = 0;
 

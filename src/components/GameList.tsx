@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Clock, Trash2, ChevronRight, Plus, Copy, Edit2, GripVertical, ArrowUpDown, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Calendar, Check, Link, Layout, Users } from 'lucide-react';
+import { Trophy, Clock, Trash2, ChevronRight, Plus, Copy, Edit2, GripVertical, ArrowUpDown, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Check, Link, Layout, Users } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { Exercise, TrainingSession } from '../types';
 
@@ -59,7 +59,7 @@ export default function GameList({
   const linkedCount = exercises.length - standaloneCount;
 
   return (
-    <div className="w-full max-w-4xl mx-auto sm:p-6 pb-32">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto sm:p-6 pb-32">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 px-4 sm:px-0 pt-1 sm:pt-0">
         <div className="flex p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-full sm:w-auto">
           <button

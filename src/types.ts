@@ -4,6 +4,7 @@ export interface SquadPlayer {
   position?: string;
   number?: string;
   photoUrl?: string;
+  role?: 'player' | 'leader';
 }
 
 export interface LineupPlayer {
@@ -23,7 +24,7 @@ export interface Lineup {
   players: LineupPlayer[];
   playerScale?: number; // 0.5 to 1.5
   nameTagStyle?: 'light' | 'dark';
-  nameDisplayMode?: 'first' | 'last' | 'full' | 'initials';
+  nameDisplayMode?: 'first' | 'last' | 'full' | 'initials' | 'firstLastInitial' | 'initialLastName';
   showNameBackground?: boolean;
   nameBackgroundType?: 'classic' | 'badge' | 'minimal' | 'solid' | 'none' | 'transparent';
   formation?: string;
@@ -53,6 +54,21 @@ export interface Lineup {
     opponentColor?: string;
     players?: LineupPlayer[];
   };
+  savedTacticalBoards?: TacticalSavedBoard[];
+}
+
+export interface TacticalSavedBoard {
+  id: string;
+  name: string;
+  createdAt: number;
+  drawings: any[];
+  opponents: { id: string, x: number, y: number }[];
+  players: LineupPlayer[];
+  footballPos: { x: number, y: number } | null;
+  footballScale?: number;
+  showOpponents: boolean;
+  opponentColor?: string;
+  pitchType?: string;
 }
 
 export interface Team {
@@ -110,12 +126,14 @@ export interface TrainingSettings {
   defaultStartTime: string;
   defaultEndTime?: string;
   defaultDuration?: number;
+  icsUrl?: string;
 }
 
 export interface CoachData {
   squad: SquadPlayer[];
   exercises: Exercise[];
   sessions: TrainingSession[];
+  deletedSessions?: TrainingSession[];
   lineups: Lineup[];
   activeLineupId: string | null;
   periods: Period[];
@@ -135,13 +153,19 @@ export interface TrainingSession {
   date: number; // Timestamp
   startTime: string; // "HH:MM"
   endTime?: string; // Optional
+  location?: string; // Location of the event
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   guestPlayers?: SquadPlayer[];
   isCompleted?: boolean;
   isStarted?: boolean;
+  isIgnored?: boolean;
+  isPlanned?: boolean;
+  isLocallyEdited?: boolean;
   actualStartTime?: number;
   notes?: string;
+  description?: string;
+  externalId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -189,6 +213,7 @@ export interface FormationVariant {
   name: string;
   description: string;
   positions: FormationPosition[]; // 10 outfield players (0-9)
+  gkPosition?: FormationPosition; // Optional Goalkeeper position
 }
 
 export interface FormationTemplate {

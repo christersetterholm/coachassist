@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Plus, Minus, Trash2, Play, UserPlus, Trophy, AlertCircle, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock } from 'lucide-react';
+import { Plus, Minus, Trash2, Play, UserPlus, Trophy, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, PRESET_COLORS, GAME_ICONS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
+import { SquadPlayer, PRESET_COLORS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
 
@@ -26,8 +26,9 @@ interface GameSetupProps {
   sessionAttendance?: string[];
   activeSessionId?: string | null;
   sessions?: TrainingSession[];
+  exercises?: Exercise[];
   currentPeriodId: string | null;
-  onAddGuest?: (name: string) => void;
+  onAddGuest?: (name: string, position?: string) => void;
   key?: React.Key;
 }
 
@@ -39,8 +40,11 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, currentPeriodId, onAddGuest }: GameSetupProps) {
-  const combinedSquad = [...(squad || []), ...(guestPlayers || [])];
+export default function GameSetup({ onStartGame, initialGame, onCancel: _onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, exercises = [], currentPeriodId, onAddGuest }: GameSetupProps) {
+  const combinedSquad = [
+    ...(squad || []).filter(p => p.role !== 'leader'), 
+    ...(guestPlayers || []).filter(p => p.role !== 'leader')
+  ];
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon] = useState(initialGame?.icon || 'Trophy');
   const [sortByScore, setSortByScore] = useState(initialGame?.sortByScore ?? false);
@@ -58,10 +62,12 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
   const [showStandaloneAttendance, setShowStandaloneAttendance] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
   const [showPointsSettings, setShowPointsSettings] = useState(false);
+  const [showCopyFromDropdown, setShowCopyFromDropdown] = useState(false);
   const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
   const [excludeGoalkeepers, setExcludeGoalkeepers] = useState(false);
   const [showGuestInput, setShowGuestInput] = useState(false);
   const [guestName, setGuestName] = useState("");
+  const [guestPosition, setGuestPosition] = useState("");
 
   const isGoalkeeper = (p: SquadPlayer) => {
     const pos = p.position?.toUpperCase() || '';
@@ -111,13 +117,6 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
       setDefaultMinutes(nextMin);
       setDefaultSeconds(nextSec);
     }
-  };
-
-  const addTeam = () => {
-    const nextColor = teams.length < VEST_COLORS.length 
-      ? VEST_COLORS[teams.length] 
-      : PRESET_COLORS[teams.length % PRESET_COLORS.length];
-    setTeams([...teams, { id: crypto.randomUUID(), name: '', color: nextColor, playerIds: [] }]);
   };
 
   const removeTeam = (id: string) => {
@@ -375,6 +374,44 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
       }
     }
     setDraggedPlayerId(null);
+  };
+
+  const copyableExercisesForSetup = (exercises || [])
+    .filter(e => e.id !== initialGame?.id && e.teams.some(t => (t.playerIds?.length || 0) > 0))
+    .sort((a, b) => {
+      const aIsSame = a.sessionId === (activeSessionId || initialGame?.sessionId) ? 1 : 0;
+      const bIsSame = b.sessionId === (activeSessionId || initialGame?.sessionId) ? 1 : 0;
+      if (aIsSame !== bIsSame) return bIsSame - aIsSame;
+      return b.createdAt - a.createdAt;
+    });
+
+  const handleCopyFromExercise = (sourceEx: Exercise) => {
+    const sourceTeams = sourceEx.teams;
+    setTeams(prevTeams => {
+      const updated = prevTeams.map((t, idx) => {
+        const sourceTeam = sourceTeams[idx];
+        return {
+          ...t,
+          playerIds: sourceTeam ? [...(sourceTeam.playerIds || [])] : []
+        };
+      });
+
+      if (sourceTeams.length > prevTeams.length) {
+        const extraTeams = sourceTeams.slice(prevTeams.length).map((st, idx) => ({
+          id: crypto.randomUUID(),
+          name: `Lag ${prevTeams.length + idx + 1}`,
+          color: VEST_COLORS[(prevTeams.length + idx) % VEST_COLORS.length] || '#71717A',
+          playerIds: [...(st.playerIds || [])]
+        }));
+        return [...updated, ...extraTeams];
+      }
+
+      return updated;
+    });
+
+    if (sourceEx.jokerPlayerIds) {
+      setJokerPlayerIds([...sourceEx.jokerPlayerIds]);
+    }
   };
 
   const clearAllTeams = () => {
@@ -736,7 +773,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
                       Skapa ny gästspelare
                     </button>
                   ) : (
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         autoFocus
                         type="text"
@@ -748,36 +785,54 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
                           if (e.key === 'Enter') {
                             e.preventDefault();
                             if (guestName.trim()) {
-                              onAddGuest(guestName.trim());
+                              onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
                               setGuestName("");
+                              setGuestPosition("");
                               setShowGuestInput(false);
                             }
                           }
                         }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (guestName.trim()) {
-                            onAddGuest(guestName.trim());
-                            setGuestName("");
+                      <select
+                        value={guestPosition}
+                        onChange={(e) => setGuestPosition(e.target.value)}
+                        className="bg-white dark:bg-zinc-900 border border-zinc-205 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                      >
+                        <option value="">Position (Valfritt)</option>
+                        <option value="MV">Målvakt (MV)</option>
+                        <option value="MB">Mittback (MB)</option>
+                        <option value="YB">Ytterback (YB)</option>
+                        <option value="MF">Mittfältare (MF)</option>
+                        <option value="YMF">Yttermittfältare (YMF)</option>
+                        <option value="FW">Forward (FW)</option>
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (guestName.trim()) {
+                              onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
+                              setGuestName("");
+                              setGuestPosition("");
+                              setShowGuestInput(false);
+                            }
+                          }}
+                          className="flex-1 shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm whitespace-nowrap"
+                        >
+                          Lägg till
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
                             setShowGuestInput(false);
-                          }
-                        }}
-                        className="shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm"
-                      >
-                        Lägg till
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowGuestInput(false);
-                          setGuestName("");
-                        }}
-                        className="p-2 text-zinc-400 hover:text-red-500"
-                      >
-                        <X size={20} />
-                      </button>
+                            setGuestName("");
+                            setGuestPosition("");
+                          }}
+                          className="p-2 text-zinc-400 hover:text-red-500"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -920,6 +975,67 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {copyableExercisesForSetup.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowCopyFromDropdown(!showCopyFromDropdown)}
+                    className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
+                        <Copy size={20} />
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Koppla/Kopiera lagindelning</span>
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">HÄMTA FRÅN ETT ANNAT MOMENT</span>
+                      </div>
+                    </div>
+                    <div className="text-zinc-400">
+                      {showCopyFromDropdown ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showCopyFromDropdown && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="bg-white dark:bg-zinc-950 p-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-850 max-h-64 overflow-y-auto">
+                          {copyableExercisesForSetup.map(ex => {
+                            const totalPlayers = ex.teams.reduce((sum, t) => sum + (t.playerIds?.length || 0), 0);
+                            return (
+                              <button
+                                type="button"
+                                key={ex.id}
+                                onClick={() => {
+                                  handleCopyFromExercise(ex);
+                                  setShowCopyFromDropdown(false);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors flex items-center justify-between"
+                              >
+                                <div className="min-w-0 pr-2">
+                                  <p className="font-extrabold text-xs text-zinc-900 dark:text-white truncate">{ex.name}</p>
+                                  <p className="text-[10px] text-zinc-500 font-medium truncate">
+                                    {new Date(ex.date).toLocaleDateString('sv-SE')} • {ex.teams.length} lag
+                                  </p>
+                                </div>
+                                <span className="shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-black text-[10px] px-2 py-1 rounded-lg">
+                                  {totalPlayers} spelare
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
 
               {teams.some(t => t.playerIds.length > 0) && (
                 <button
@@ -1089,7 +1205,6 @@ export default function GameSetup({ onStartGame, initialGame, onCancel, squad = 
                               const player = combinedSquad.find(p => p.id === pid);
                               if (!player) return null;
                               const isJoker = jokerPlayerIds.includes(player.id);
-                            const isInAnyTeam = teams.some(t => t.playerIds.includes(player.id));
                             
                             return (
                               <button

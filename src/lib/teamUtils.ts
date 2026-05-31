@@ -28,6 +28,55 @@ export function getPositionRank(position?: string): number {
   return 500;
 }
 
+export function getLeaderRank(position?: string): number {
+  if (!position) return 100;
+  const p = position.toLowerCase();
+
+  // 1. Huvudtränare / Tränare
+  if (p.includes('huvud') || p.includes('head') || p === 'tränare' || p === 'tranare' || p === 'manager' || p === 'coach') return 0;
+
+  // 2. Assisterande tränare
+  if (p.includes('assisterande') || p.includes('assistant') || p.includes('ass.')) return 1;
+
+  // 3. Målvaktstränare / Fystränare
+  if (p.includes('målvaktstränare') || p.includes('målvaktstranare') || p.includes('mv-tränare') || p.includes('mv-tranare') || p.includes('goalkeeper')) return 2;
+  if (p.includes('fystränare') || p.includes('fys.tränare') || p.includes('fys-tränare') || p.includes('fystranare') || p.includes('fys.tranare') || p.includes('fysiotränare') || p.includes('fysiotranare')) return 3;
+
+  // 4. Lagledare
+  if (p.includes('lagledare') || p.includes('team manager')) return 4;
+
+  // 5. Analytiker
+  if (p.includes('analytiker') || p.includes('analyst')) return 5;
+
+  // 6. Medicinsk staber/fysio
+  if (
+    p.includes('fysio') || p.includes('physio') || p.includes('naprapat') || 
+    p.includes('kiropraktor') || p.includes('massör') || p.includes('massor') || 
+    p.includes('läkare') || p.includes('lakare') || p.includes('sjukgymnast') ||
+    p.includes('doctor') || p.includes('medicin')
+  ) return 6;
+
+  // 7. Materialförvaltare
+  if (p.includes('material') || p.includes('kit')) return 7;
+
+  // 8. Övriga ledarroller
+  if (p.includes('ledare') || p.includes('admin') || p.includes('styrelse')) return 8;
+
+  return 50;
+}
+
+export function sortLeadersByPosition(leaders: SquadPlayer[]): SquadPlayer[] {
+  return [...leaders].sort((a, b) => {
+    const rankA = getLeaderRank(a.position);
+    const rankB = getLeaderRank(b.position);
+    
+    if (rankA !== rankB) return rankA - rankB;
+    
+    // alphabetical if same rank
+    return a.name.localeCompare(b.name, 'sv');
+  });
+}
+
 export function sortPlayersByPosition(playerIds: string[], squad: SquadPlayer[]): string[] {
   return [...playerIds].sort((a, b) => {
     const playerA = squad.find(p => p.id === a);

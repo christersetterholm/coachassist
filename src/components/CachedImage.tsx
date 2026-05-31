@@ -140,7 +140,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
       crossOrigin={isLocal ? undefined : finalCrossOrigin} 
       referrerPolicy="no-referrer"
       {...cleanProps} 
-      onError={(e) => {
+      onError={() => {
         console.error(`[CachedImage] img.onError triggered for ${displaySrc.substring(0, 100)}...`);
         setLoadError(true);
       }}
