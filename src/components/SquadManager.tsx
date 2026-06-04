@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useMemo } from 'react';
+import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { storage } from '../lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -9,6 +9,81 @@ import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
 import { sortLeadersByPosition } from '../lib/teamUtils';
+
+type SortOption = 'standard' | 'number' | 'position' | 'firstname' | 'lastname';
+
+function getLastName(fullName: string): string {
+  const name = fullName.trim();
+  const lastSpace = name.lastIndexOf(' ');
+  if (lastSpace === -1) return '';
+  return name.slice(lastSpace + 1);
+}
+
+function getFirstName(fullName: string): string {
+  const name = fullName.trim();
+  const lastSpace = name.lastIndexOf(' ');
+  if (lastSpace === -1) return name;
+  return name.slice(0, lastSpace);
+}
+
+function parseNumber(numStr?: string): number {
+  if (!numStr) return Infinity; // Put players without numbers at the end
+  const parsed = parseInt(numStr.replace(/\D/g, ''), 10);
+  return isNaN(parsed) ? Infinity : parsed;
+}
+
+function getPositionWeight(pos?: string): number {
+  if (!pos) return 99; // Put players without position at the end
+  const p = pos.toLowerCase();
+  if (p.includes('mål') || p.includes('mv') || p.includes('gk') || p.includes('keeper')) return 1;
+  if (p.includes('back') || p.includes('försvar') || p.includes('def') || p.includes('mittback') || p.includes('ytterback')) return 2;
+  if (p.includes('mitt') || p.includes('mf') || p.includes('mid') || p.includes('cen')) return 3;
+  if (p.includes('anfall') || p.includes('forward') || p.includes('fw') || p.includes('topp') || p.includes('straff') || p.includes('ytteranfall')) return 4;
+  if (p.includes('ledar') || p.includes('tränare') || p.includes('coach')) return 5;
+  return 10; // Other positions
+}
+
+const comparePlayersByNumber = (a: SquadPlayer, b: SquadPlayer) => {
+  const numA = parseNumber(a.number);
+  const numB = parseNumber(b.number);
+  if (numA !== numB) return numA - numB;
+  return a.name.localeCompare(b.name, 'sv');
+};
+
+const compareByPosition = (a: SquadPlayer, b: SquadPlayer) => {
+  const weightA = getPositionWeight(a.position);
+  const weightB = getPositionWeight(b.position);
+  if (weightA !== weightB) return weightA - weightB;
+
+  // Secondary: sort by position name alphabetically to keep identical ones together
+  const posA = a.position || '';
+  const posB = b.position || '';
+  const compPos = posA.localeCompare(posB, 'sv');
+  if (compPos !== 0) return compPos;
+
+  // Tertiary: sort by shirt number
+  const numA = parseNumber(a.number);
+  const numB = parseNumber(b.number);
+  if (numA !== numB) return numA - numB;
+
+  return a.name.localeCompare(b.name, 'sv');
+};
+
+const compareByFirstName = (a: SquadPlayer, b: SquadPlayer) => {
+  const firstA = getFirstName(a.name);
+  const firstB = getFirstName(b.name);
+  const comp = firstA.localeCompare(firstB, 'sv');
+  if (comp !== 0) return comp;
+  return getLastName(a.name).localeCompare(getLastName(b.name), 'sv');
+};
+
+const compareByLastName = (a: SquadPlayer, b: SquadPlayer) => {
+  const lastA = getLastName(a.name);
+  const lastB = getLastName(b.name);
+  const comp = lastA.localeCompare(lastB, 'sv');
+  if (comp !== 0) return comp;
+  return getFirstName(a.name).localeCompare(getFirstName(b.name), 'sv');
+};
 
 interface SquadManagerProps {
   squad: SquadPlayer[];
@@ -32,6 +107,46 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
   const [pasteData, setPasteData] = useState('');
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [sortBy, setSortBy] = useState<SortOption>(() => {
+    return (localStorage.getItem('squad_sort_by') as SortOption) || 'standard';
+  });
+
+  const handleSortChange = (option: SortOption) => {
+    setSortBy(option);
+    localStorage.setItem('squad_sort_by', option);
+  };
+
+  const sortedPlayers = useMemo(() => {
+    const players = Array.from(new Map(squad.filter(p => p.role !== 'leader').map(p => [p.id, p])).values());
+    if (sortBy === 'firstname') {
+      return players.sort(compareByFirstName);
+    } else if (sortBy === 'lastname') {
+      return players.sort(compareByLastName);
+    } else if (sortBy === 'number') {
+      return players.sort(comparePlayersByNumber);
+    } else if (sortBy === 'position') {
+      return players.sort(compareByPosition);
+    } else {
+      // 'standard': Position then shirt number
+      return players.sort(compareByPosition);
+    }
+  }, [squad, sortBy]);
+
+  const sortedLeaders = useMemo(() => {
+    const leaders = Array.from(new Map(squad.filter(p => p.role === 'leader').map(p => [p.id, p])).values());
+    if (sortBy === 'firstname') {
+      return leaders.sort(compareByFirstName);
+    } else if (sortBy === 'lastname') {
+      return leaders.sort(compareByLastName);
+    } else if (sortBy === 'number') {
+      return leaders.sort(comparePlayersByNumber);
+    } else if (sortBy === 'position') {
+      return leaders.sort(compareByPosition);
+    } else {
+      return sortLeadersByPosition(leaders);
+    }
+  }, [squad, sortBy]);
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,6 +384,37 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
         )}
       </div>
 
+      {squad.length > 0 && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm">
+          <div className="flex items-center gap-2 text-zinc-550 dark:text-zinc-450">
+            <ArrowUpDown size={16} className="text-zinc-400 shrink-0" />
+            <span className="text-[11px] font-black uppercase tracking-widest shrink-0">Sortera efter</span>
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0">
+            {[
+              { value: 'standard', label: 'Standard' },
+              { value: 'number', label: 'Tröjnummer' },
+              { value: 'position', label: 'Position' },
+              { value: 'firstname', label: 'Förnamn' },
+              { value: 'lastname', label: 'Efternamn' }
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => handleSortChange(opt.value as SortOption)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 border ${
+                  sortBy === opt.value
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <AnimatePresence>
         {isImporting && (
           <motion.div
@@ -504,7 +650,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <AnimatePresence mode="popLayout">
-                {Array.from(new Map(squad.filter(p => p.role !== 'leader').map(p => [p.id, p])).values()).map((player) => (
+                {sortedPlayers.map((player) => (
                   <motion.div
                     layout
                     key={player.id}
@@ -582,7 +728,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <AnimatePresence mode="popLayout">
-                {sortLeadersByPosition(Array.from(new Map(squad.filter(p => p.role === 'leader').map(p => [p.id, p])).values())).map((player) => (
+                {sortedLeaders.map((player) => (
                   <motion.div
                     layout
                     key={player.id}

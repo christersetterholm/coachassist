@@ -791,11 +791,34 @@ export default function SessionEditor({
           <TeamOverviewModal
             exercise={currentExercise}
             squad={[...(squad || []), ...(session.guestPlayers || [])]}
+            attendingIds={session.attendance}
             onMovePlayer={onMovePlayer || (() => {})}
             onClose={() => setSelectedExerciseForTeams(null)}
             exercises={exercises}
             onCopyTeams={(sourceId) => onCopyTeams && onCopyTeams(sourceId, selectedExerciseForTeams)}
             onAddGuest={handleQuickAddGuest}
+            onAddSquadPlayerToAttendance={(playerId) => {
+              const currentSession = sessionRef.current;
+              const currentAttendance = currentSession.attendance || [];
+              if (!currentAttendance.includes(playerId)) {
+                onUpdate({
+                  ...currentSession,
+                  attendance: [...currentAttendance, playerId],
+                  updatedAt: Date.now()
+                });
+              }
+            }}
+            onRemovePlayerFromAttendance={(playerId) => {
+              const currentSession = sessionRef.current;
+              const currentAttendance = currentSession.attendance || [];
+              const isGuest = playerId.startsWith('guest_');
+              onUpdate({
+                ...currentSession,
+                attendance: currentAttendance.filter(id => id !== playerId),
+                guestPlayers: isGuest ? (currentSession.guestPlayers || []).filter(p => p.id !== playerId) : currentSession.guestPlayers,
+                updatedAt: Date.now()
+              });
+            }}
             onStart={() => {
               const id = selectedExerciseForTeams;
               setSelectedExerciseForTeams(null);

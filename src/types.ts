@@ -30,6 +30,7 @@ export interface Lineup {
   formation?: string;
   showPhoto?: boolean;
   showNumber?: boolean;
+  showName?: boolean;
   isArchived?: boolean;
   teamLogoUrl?: string;
   pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black';

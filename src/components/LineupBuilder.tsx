@@ -6,7 +6,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Download, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Tablet, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -36,6 +36,160 @@ interface LineupBuilderProps {
   sessionActionCount?: number;
   isQuotaExceeded?: boolean;
   syncError?: string | null;
+}
+
+interface DelaunayPoint {
+  x: number;
+  y: number;
+  id?: string;
+  name?: string;
+}
+
+interface DelaunayEdge {
+  p1: number;
+  p2: number;
+}
+
+function getCircumcircle(p1: DelaunayPoint, p2: DelaunayPoint, p3: DelaunayPoint) {
+  const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+  if (Math.abs(d) < 1e-9) {
+    return { x: 0, y: 0, rSq: -1 };
+  }
+  const p1Sq = p1.x * p1.x + p1.y * p1.y;
+  const p2Sq = p2.x * p2.x + p2.y * p2.y;
+  const p3Sq = p3.x * p3.x + p3.y * p3.y;
+
+  const ux = ((p1Sq * (p2.y - p3.y)) + (p2Sq * (p3.y - p1.y)) + (p3Sq * (p1.y - p2.y))) / d;
+  const uy = ((p1Sq * (p3.x - p2.x)) + (p2Sq * (p1.x - p3.x)) + (p3Sq * (p2.x - p1.x))) / d;
+  const rSq = (p1.x - ux) * (p1.x - ux) + (p1.y - uy) * (p1.y - uy);
+  return { x: ux, y: uy, rSq };
+}
+
+function getDelaunayTriangulation(points: DelaunayPoint[]): DelaunayEdge[] {
+  if (points.length < 2) return [];
+  if (points.length === 2) {
+    return [{ p1: 0, p2: 1 }];
+  }
+
+  // To prevent numerical issues, jitter slightly
+  const jitteredPoints = points.map((p, i) => ({
+    x: p.x + (Math.sin(i) * 0.0001),
+    y: p.y + (Math.cos(i) * 0.0001)
+  }));
+
+  // Find bounding box for super-triangle
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of jitteredPoints) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const dx = maxX - minX;
+  const dy = maxY - minY;
+  const deltaMax = Math.max(dx, dy) || 100;
+  const midX = (minX + maxX) / 2;
+  const midY = (minY + maxY) / 2;
+
+  // Super-triangle vertices enclosing all points
+  const p1 = { x: midX - 20 * deltaMax - 1, y: midY - deltaMax - 1 };
+  const p2 = { x: midX, y: midY + 20 * deltaMax + 1 };
+  const p3 = { x: midX + 20 * deltaMax + 1, y: midY - deltaMax - 1 };
+
+  const allPoints = [...jitteredPoints, p1, p2, p3];
+  const n = jitteredPoints.length;
+
+  interface TriangleDef {
+    a: number;
+    b: number;
+    c: number;
+    ux: number;
+    uy: number;
+    rSq: number;
+  }
+
+  const triangles: TriangleDef[] = [];
+
+  function addTriangle(a: number, b: number, c: number) {
+    const cc = getCircumcircle(allPoints[a], allPoints[b], allPoints[c]);
+    triangles.push({ a, b, c, ux: cc.x, uy: cc.y, rSq: cc.rSq });
+  }
+
+  addTriangle(n, n + 1, n + 2);
+
+  for (let i = 0; i < n; i++) {
+    const p = allPoints[i];
+    const badTriangles: number[] = [];
+
+    for (let j = 0; j < triangles.length; j++) {
+      const tri = triangles[j];
+      const distSq = (p.x - tri.ux) * (p.x - tri.ux) + (p.y - tri.uy) * (p.y - tri.uy);
+      if (distSq < tri.rSq + 1e-9) {
+        badTriangles.push(j);
+      }
+    }
+
+    const polygon: DelaunayEdge[] = [];
+    for (const btIndex of badTriangles) {
+      const tri = triangles[btIndex];
+      const edges = [
+        { p1: tri.a, p2: tri.b },
+        { p1: tri.b, p2: tri.c },
+        { p1: tri.c, p2: tri.a }
+      ];
+
+      for (const edge of edges) {
+        let isShared = false;
+        for (const otherBtIndex of badTriangles) {
+          if (btIndex === otherBtIndex) continue;
+          const ot = triangles[otherBtIndex];
+          const otVertices = [ot.a, ot.b, ot.c];
+          if (otVertices.includes(edge.p1) && otVertices.includes(edge.p2)) {
+            isShared = true;
+            break;
+          }
+        }
+        if (!isShared) {
+          polygon.push(edge);
+        }
+      }
+    }
+
+    badTriangles.sort((a, b) => b - a);
+    for (const index of badTriangles) {
+      triangles.splice(index, 1);
+    }
+
+    for (const edge of polygon) {
+      addTriangle(edge.p1, edge.p2, i);
+    }
+  }
+
+  const resultEdges: DelaunayEdge[] = [];
+  const edgeKeySet = new Set<string>();
+
+  for (const tri of triangles) {
+    if (tri.a >= n || tri.b >= n || tri.c >= n) continue;
+
+    const edges = [
+      { p1: tri.a, p2: tri.b },
+      { p1: tri.b, p2: tri.c },
+      { p1: tri.c, p2: tri.a }
+    ];
+
+    for (const edge of edges) {
+      const u = Math.min(edge.p1, edge.p2);
+      const v = Math.max(edge.p1, edge.p2);
+      const key = `${u}-${v}`;
+      if (!edgeKeySet.has(key)) {
+        edgeKeySet.add(key);
+        resultEdges.push({ p1: u, p2: v });
+      }
+    }
+  }
+
+  return resultEdges;
 }
 
 const EXPORT_FORMATS = {
@@ -192,6 +346,7 @@ export default function LineupBuilder({
   const [showNameBackground, setShowNameBackground] = useState(lineup?.showNameBackground ?? true);
   const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal'>(lineup?.nameBackgroundType || 'classic');
   const [showPhoto, setShowPhoto] = useState(lineup?.showPhoto ?? true);
+  const [showName, setShowName] = useState(lineup?.showName ?? true);
   const [showImport, setShowImport] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [importResult, setImportResult] = useState<{ found: string[], missing: string[] } | null>(null);
@@ -255,6 +410,7 @@ export default function LineupBuilder({
   const [isMaximized, setIsMaximized] = useState(false);
   const [isControlsVisible, setIsControlsVisible] = useState(true);
   const [isDrawingsVisible, setIsDrawingsVisible] = useState(true);
+  const [showDelaunayNetwork, setShowDelaunayNetwork] = useState(false);
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
@@ -316,9 +472,14 @@ export default function LineupBuilder({
   // Whenever entering rittavlan/maximized mode, copy the current lineup's player positions to the tactical players
   useEffect(() => {
     if (isMaximized) {
-      setTacticalPlayers(players.map(p => ({ ...p })));
+      const savedTactical = lineup?.tacticalBoard?.players || [];
+      if (savedTactical.length > 0) {
+        setTacticalPlayers(savedTactical.map(p => ({ ...p })));
+      } else {
+        setTacticalPlayers(players.map(p => ({ ...p })));
+      }
     }
-  }, [isMaximized]);
+  }, [isMaximized, lineup]);
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
@@ -433,6 +594,7 @@ export default function LineupBuilder({
       setShowNameBackground(lineup.showNameBackground ?? true);
       setNameBackgroundType(lineup.nameBackgroundType || 'classic');
       setShowPhoto(lineup.showPhoto ?? true);
+      setShowName(lineup.showName ?? true);
       setShowNumber(lineup.showNumber ?? true);
       setTeamLogoUrl(lineup.teamLogoUrl || '');
       setPitchType(lineup.pitchType || 'classic');
@@ -449,10 +611,11 @@ export default function LineupBuilder({
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
+      const savedTacticalPlayers = lineup.tacticalBoard?.players || [];
       setTacticalPlayers(
-        isMaximized 
-          ? (lineup.players || []).map(p => ({ ...p }))
-          : (lineup.tacticalBoard?.players || [])
+        savedTacticalPlayers.length > 0 
+          ? savedTacticalPlayers.map(p => ({ ...p }))
+          : (lineup.players || []).map(p => ({ ...p }))
       );
       
       // Deduplicate players by ID
@@ -489,6 +652,7 @@ export default function LineupBuilder({
         showNameBackground,
         nameBackgroundType,
         showPhoto,
+        showName,
         showNumber,
         teamLogoUrl,
         pitchType,
@@ -509,7 +673,7 @@ export default function LineupBuilder({
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, players, tacticalPlayers, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, players, tacticalPlayers, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0 || isRestoringHistory.current) return;
@@ -524,6 +688,7 @@ export default function LineupBuilder({
       showNameBackground,
       nameBackgroundType,
       showPhoto,
+      showName,
       showNumber,
       teamLogoUrl,
       pitchType,
@@ -552,6 +717,7 @@ export default function LineupBuilder({
     setShowNameBackground(last.showNameBackground);
     setNameBackgroundType(last.nameBackgroundType);
     setShowPhoto(last.showPhoto);
+    setShowName(last.showName ?? true);
     setShowNumber(last.showNumber);
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
@@ -570,7 +736,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -586,6 +752,7 @@ export default function LineupBuilder({
       showNameBackground,
       nameBackgroundType,
       showPhoto,
+      showName,
       showNumber,
       teamLogoUrl,
       pitchType,
@@ -614,6 +781,7 @@ export default function LineupBuilder({
     setShowNameBackground(next.showNameBackground);
     setNameBackgroundType(next.nameBackgroundType);
     setShowPhoto(next.showPhoto);
+    setShowName(next.showName ?? true);
     setShowNumber(next.showNumber);
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
@@ -632,7 +800,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) return;
@@ -1360,6 +1528,7 @@ export default function LineupBuilder({
       lineup.showNameBackground !== showNameBackground ||
       lineup.nameBackgroundType !== nameBackgroundType ||
       lineup.showPhoto !== showPhoto ||
+      lineup.showName !== showName ||
       lineup.showNumber !== showNumber ||
       lineup.teamLogoUrl !== teamLogoUrl ||
       lineup.formation !== currentFormation ||
@@ -1371,7 +1540,7 @@ export default function LineupBuilder({
     if (!isStillDifferent) {
       setHasUnsavedChanges(false);
     }
-  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
+  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, opponents, showOpponents, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
 
   // Auto-save changes back to the parent
   useEffect(() => {
@@ -1389,6 +1558,7 @@ export default function LineupBuilder({
       showNameBackground,
       nameBackgroundType,
       showPhoto,
+      showName,
       showNumber,
       teamLogoUrl,
       pitchType,
@@ -1442,6 +1612,7 @@ export default function LineupBuilder({
       lineup.showNameBackground !== showNameBackground ||
       lineup.nameBackgroundType !== nameBackgroundType ||
       lineup.showPhoto !== showPhoto ||
+      lineup.showName !== showName ||
       lineup.showNumber !== showNumber ||
       lineup.teamLogoUrl !== teamLogoUrl ||
       lineup.formation !== currentFormation ||
@@ -1482,7 +1653,7 @@ export default function LineupBuilder({
         });
       }
     };
-  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
+  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -2568,6 +2739,44 @@ export default function LineupBuilder({
                   )}
                 </g>
               )}
+
+              {/* Automatically generated Delaunay Network (Passningsmöjligheter) */}
+              {showDelaunayNetwork && starters.length >= 2 && (() => {
+                const pointsList = starters.map(p => {
+                  const isDragging = draggingId === p.id;
+                  const displayX = isDragging && dragPos ? dragPos.x : p.x;
+                  const displayY = isDragging && dragPos ? dragPos.y : p.y;
+                  return { x: displayX, y: displayY, id: p.id };
+                });
+                
+                const edges = getDelaunayTriangulation(pointsList);
+                return (
+                  <g className="pointer-events-none z-10">
+                    {edges.map((edge, idx) => {
+                      const p1 = pointsList[edge.p1];
+                      const p2 = pointsList[edge.p2];
+                      if (!p1 || !p2) return null;
+                      return (
+                        <line
+                          key={`delaunay-edge-${idx}`}
+                          x1={p1.x}
+                          y1={p1.y}
+                          x2={p2.x}
+                          y2={p2.y}
+                          stroke="#6366f1"
+                          strokeWidth="0.45"
+                          strokeOpacity={0.7}
+                          strokeDasharray="1.5, 1"
+                          className="animate-pulse"
+                          style={{
+                            animationDuration: '2.5s'
+                          }}
+                        />
+                      );
+                    })}
+                  </g>
+                );
+              })()}
             </svg>
           )}
 
@@ -2787,47 +2996,49 @@ export default function LineupBuilder({
                         </div>
                       )}
                     </div>
-                    <div className="mt-1">
-                      <div 
-                        className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
-                          (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
-                            `rounded-full px-2 py-0.5 shadow-md border ${
-                              hoveredPlayerId === p.id 
-                                ? 'bg-indigo-600 text-white border-indigo-400 scale-105'
-                                : (nameTagStyle === 'dark' 
-                                    ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
-                                    : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200'))
-                            }`
-                          ) : 'gap-0.5'
-                        }`}
-                        style={{
-                          fontSize: `${0.6 * playerScale}rem`,
-                          opacity: isDragging ? 0.3 : 1,
-                        }}
-                      >
-                        {(() => {
-                          const displayName = getVisibleName(sp.name);
-                          const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
-                          const parts = useSingleLine ? [displayName] : displayName.split(' ');
-                          return parts.map((part, i) => (
-                            <div 
-                              key={i} 
-                              className={`truncate whitespace-nowrap ${
-                                hoveredPlayerId === p.id ? 'text-white' : (
-                                  nameBackgroundType === 'solid' ? (
-                                    `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
-                                  ) : 
-                                  (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
-                                  (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
-                                )
-                              }`}
-                            >
-                              {part}
-                            </div>
-                          ));
-                        })()}
+                    {showName && (
+                      <div className="mt-1">
+                        <div 
+                          className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
+                            (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
+                              `rounded-full px-2 py-0.5 shadow-md border ${
+                                hoveredPlayerId === p.id 
+                                  ? 'bg-indigo-600 text-white border-indigo-400 scale-105'
+                                  : (nameTagStyle === 'dark' 
+                                      ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
+                                      : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200'))
+                              }`
+                            ) : 'gap-0.5'
+                          }`}
+                          style={{
+                            fontSize: `${0.6 * playerScale}rem`,
+                            opacity: isDragging ? 0.3 : 1,
+                          }}
+                        >
+                          {(() => {
+                            const displayName = getVisibleName(sp.name);
+                            const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                            const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                            return parts.map((part, i) => (
+                              <div 
+                                key={i} 
+                                className={`truncate whitespace-nowrap ${
+                                  hoveredPlayerId === p.id ? 'text-white' : (
+                                    nameBackgroundType === 'solid' ? (
+                                      `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
+                                    ) : 
+                                    (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
+                                    (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
+                                  )
+                                }`}
+                              >
+                                {part}
+                              </div>
+                            ));
+                          })()}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               );
@@ -2987,22 +3198,24 @@ export default function LineupBuilder({
                           </div>
                         )}
                       </div>
-                      <div 
-                        className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
-                        style={{
-                          fontSize: `${0.6 * playerScale}rem`,
-                          marginTop: `${0.4 * playerScale}rem`
-                        }}
-                      >
-                        {(() => {
-                          const displayName = getVisibleName(sp.name);
-                          const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
-                          const parts = useSingleLine ? [displayName] : displayName.split(' ');
-                          return parts.map((part, i) => (
-                            <div key={i} className="truncate whitespace-nowrap">{part}</div>
-                          ));
-                        })()}
-                      </div>
+                      {showName && (
+                        <div 
+                          className="font-bold text-zinc-900 dark:text-white max-w-[80px] text-center leading-tight transition-all"
+                          style={{
+                            fontSize: `${0.6 * playerScale}rem`,
+                            marginTop: `${0.4 * playerScale}rem`
+                          }}
+                        >
+                          {(() => {
+                            const displayName = getVisibleName(sp.name);
+                            const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                            const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                            return parts.map((part, i) => (
+                              <div key={i} className="truncate whitespace-nowrap">{part}</div>
+                            ));
+                          })()}
+                        </div>
+                      )}
                     </Reorder.Item>
                   );
                 })
@@ -3023,136 +3236,149 @@ export default function LineupBuilder({
     >
       {isMaximized && (
         <>
-          <div className="fixed top-3 right-3 z-[100] flex items-center gap-2">
-            <button
-              onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                isDrawingsVisible
-                  ? 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
-                  : 'bg-zinc-500/10 text-zinc-400 hover:bg-zinc-500/20 border-zinc-500/25'
-              }`}
-              title={isDrawingsVisible ? "Dölj ritat/placerat på planen" : "Visa ritat/placerat på planen"}
-            >
-              {isDrawingsVisible ? <Eye size={16} /> : <EyeOff size={16} />}
-            </button>
-            <button
-              onClick={() => setIsControlsVisible(!isControlsVisible)}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                isControlsVisible 
-                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
-              }`}
-              title={isControlsVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
-            >
-              <Pencil size={16} />
-            </button>
-            <button
-              onClick={() => setShowFormationModal(true)}
-              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
-              title="Välj formation / positioner"
-            >
-              <Layout size={16} />
-            </button>
-            <button
-              onClick={() => setShowNotesModal(true)}
-              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
-              title="Anteckningar"
-            >
-              <ClipboardList size={16} />
-            </button>
-            <button
-              onClick={() => setShowTacticalSavedBoardsModal(true)}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                showTacticalSavedBoardsModal 
-                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700' 
-                  : 'bg-emerald-600/10 text-emerald-650 hover:bg-emerald-600/20 border-emerald-500/35'
-              }`}
-              title="Spara / Öppna rittavlor"
-            >
-              <Bookmark size={16} />
-            </button>
-            <button
-              onClick={() => {
-                const nextVal = !showSavedLineups;
-                setShowSavedLineups(nextVal);
-                if (nextVal) {
+          <div className="fixed top-3 left-3 right-3 z-[100] flex justify-end pointer-events-none">
+            <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none touch-pan-x py-1 px-2 pointer-events-auto max-w-full">
+              <button
+                onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  isDrawingsVisible
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={isDrawingsVisible ? "Dölj ritat/placerat på planen" : "Visa ritat/placerat på planen"}
+              >
+                {isDrawingsVisible ? <Eye size={16} /> : <EyeOff size={16} />}
+              </button>
+              <button
+                onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  showDelaunayNetwork
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
+              >
+                <Network size={16} />
+              </button>
+              <button
+                onClick={() => setIsControlsVisible(!isControlsVisible)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  isControlsVisible 
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={isControlsVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                onClick={() => setShowFormationModal(true)}
+                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                title="Välj formation / positioner"
+              >
+                <Layout size={16} />
+              </button>
+              <button
+                onClick={() => setShowNotesModal(true)}
+                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                title="Anteckningar"
+              >
+                <ClipboardList size={16} />
+              </button>
+              <button
+                onClick={() => setShowTacticalSavedBoardsModal(true)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  showTacticalSavedBoardsModal 
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title="Spara / Öppna rittavlor"
+              >
+                <Bookmark size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  const nextVal = !showSavedLineups;
+                  setShowSavedLineups(nextVal);
+                  if (nextVal) {
+                    setShowBenchMaximized(false);
+                    setShowZoomMenu(false);
+                  }
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  showSavedLineups 
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
+              >
+                <FolderOpen size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  const nextVal = !showBenchMaximized;
+                  setShowBenchMaximized(nextVal);
+                  if (nextVal) {
+                    setShowSavedLineups(false);
+                    setShowZoomMenu(false);
+                  }
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  showBenchMaximized 
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={showBenchMaximized ? "Dölj avbätare" : "Visa avbytare (Bänk)"}
+              >
+                <Shirt size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  const nextVal = !showZoomMenu;
+                  setShowZoomMenu(nextVal);
+                  if (nextVal) {
+                    setShowSavedLineups(false);
+                    setShowBenchMaximized(false);
+                  }
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                  showZoomMenu 
+                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
+                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                }`}
+                title={showZoomMenu ? "Dölj zoominställningar" : "Visa zoominställningar"}
+              >
+                <ZoomIn size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+                  setOrientation(newOrientation);
+                  if (newOrientation === 'landscape') {
+                    setAttackDirection('right');
+                  } else {
+                    setAttackDirection('up');
+                  }
+                  setHasUnsavedChanges(true);
+                }}
+                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
+              >
+                {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
+              </button>
+              <button
+                onClick={() => {
+                  setIsMaximized(false);
+                  setShowSavedLineups(true);
                   setShowBenchMaximized(false);
                   setShowZoomMenu(false);
-                }
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                showSavedLineups 
-                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
-              }`}
-              title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
-            >
-              <FolderOpen size={16} />
-            </button>
-            <button
-              onClick={() => {
-                const nextVal = !showBenchMaximized;
-                setShowBenchMaximized(nextVal);
-                if (nextVal) {
-                  setShowSavedLineups(false);
-                  setShowZoomMenu(false);
-                }
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                showBenchMaximized 
-                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
-              }`}
-              title={showBenchMaximized ? "Dölj avbätare" : "Visa avbytare (Bänk)"}
-            >
-              <Shirt size={16} />
-            </button>
-            <button
-              onClick={() => {
-                const nextVal = !showZoomMenu;
-                setShowZoomMenu(nextVal);
-                if (nextVal) {
-                  setShowSavedLineups(false);
-                  setShowBenchMaximized(false);
-                }
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all group pointer-events-auto ${
-                showZoomMenu 
-                  ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                  : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
-              }`}
-              title={showZoomMenu ? "Dölj zoominställningar" : "Visa zoominställningar"}
-            >
-              <ZoomIn size={16} />
-            </button>
-            <button
-              onClick={() => {
-                const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
-                setOrientation(newOrientation);
-                if (newOrientation === 'landscape') {
-                  setAttackDirection('right');
-                } else {
-                  setAttackDirection('up');
-                }
-                setHasUnsavedChanges(true);
-              }}
-              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
-              title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
-            >
-              {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
-            </button>
-            <button
-              onClick={() => {
-                setIsMaximized(false);
-                setShowSavedLineups(true);
-                setShowBenchMaximized(false);
-                setShowZoomMenu(false);
-              }}
-              className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all group pointer-events-auto"
-              title="Lämna rittavlan"
-            >
-              <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
-            </button>
+                }}
+                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                title="Lämna rittavlan"
+              >
+                <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
+              </button>
+            </div>
           </div>
 
           {/* Floating Compact Lineups Menu under top right controls bar */}
@@ -3565,6 +3791,16 @@ export default function LineupBuilder({
                     title="Suddgummi"
                   >
                     <Eraser size={20} strokeWidth={2.5} />
+                  </button>
+
+                  <div className="h-6 w-[1px] bg-zinc-200 dark:bg-zinc-800 mx-1 shrink-0" />
+
+                  <button 
+                    onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
+                    className={`p-2.5 rounded-xl transition-all ${showDelaunayNetwork ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
+                  >
+                    <Network size={20} strokeWidth={2.5} />
                   </button>
                 </div>
 
@@ -4220,6 +4456,25 @@ export default function LineupBuilder({
                   <div className={`w-3 h-3 rounded-md border-2 border-current flex items-center justify-center ${showNumber ? 'bg-white border-white' : 'border-zinc-400'}`}>
                     {showNumber && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-sm" />}
                   </div>
+                </button>
+              </div>
+
+              {/* Name Toggle */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Namn</span>
+                <button
+                  onClick={() => {
+                    setShowName(!showName);
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
+                    showName
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
+                  }`}
+                >
+                  <span className="text-[10px] font-black uppercase tracking-widest">{showName ? 'Ja' : 'Nej'}</span>
+                  <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
                 </button>
               </div>
 

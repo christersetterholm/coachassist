@@ -143,6 +143,7 @@ export default function App() {
   const [finishTargetPeriodId, setFinishTargetPeriodId] = useState<string | null>(null);
   const [isEditingActiveExercise, setIsEditingActiveExercise] = useState(false);
   const [editReturnView, setEditReturnView] = useState<View | null>(null);
+  const [previousActiveExerciseId, setPreviousActiveExerciseId] = useState<string | null | undefined>(undefined);
   const [showTeamOverview, setShowTeamOverview] = useState(false);
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
@@ -749,7 +750,8 @@ export default function App() {
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
     periodId?: string | null,
-    sessionId?: string | null
+    sessionId?: string | null,
+    shouldStart?: boolean
   ) => {
     const now = Date.now();
     const resolvedSessionId = (sessionId && sessionId !== 'active') ? sessionId : (activeSessionId || undefined);
@@ -772,11 +774,13 @@ export default function App() {
       sessionId: resolvedSessionId
     };
     
+    const nextActiveExerciseId = shouldStart !== false ? newExercise.id : previousActiveExerciseId;
+
     setData(prev => ({
       ...prev,
       exercises: [newExercise, ...prev.exercises],
       activeLineupId: activeLineupId,
-      activeExerciseId: newExercise.id,
+      activeExerciseId: nextActiveExerciseId,
       sessions: (linkToMomentId && activeSessionId) 
         ? prev.sessions.map(s => s.id === activeSessionId 
             ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: newExercise.id } : m), updatedAt: Date.now() } 
@@ -787,14 +791,17 @@ export default function App() {
     
     setLinkToMomentId(null);
     setPrefilledName(null);
+    setPreviousActiveExerciseId(undefined);
 
-    // If it has a session ID, we return to the training view (session editor)
-    if (resolvedSessionId) {
+    if (editReturnView) {
+      setView(editReturnView);
+      setEditReturnView(null);
+    } else if (resolvedSessionId) {
       setActiveSessionId(resolvedSessionId);
       setView('training');
     } else {
       setActiveSessionId(null);
-      setView('exercise');
+      setView(shouldStart !== false ? 'exercise' : 'training');
     }
   };
 
@@ -813,42 +820,46 @@ export default function App() {
   ) => {
     if (!activeExerciseId) return;
     
-    setData(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(e => {
-        if (e.id !== prev.activeExerciseId) return e;
-        
-        const updatedTeams = teams.map(t => {
-          const existingTeam = e.teams.find(et => et.id === t.id);
-          return {
-            ...t,
-            playerIds: t.playerIds || [],
-            score: existingTeam ? existingTeam.score : 0
-          };
-        });
+    setData(prev => {
+      const nextActiveId = previousActiveExerciseId !== undefined ? previousActiveExerciseId : prev.activeExerciseId;
+      return {
+        ...prev,
+        activeExerciseId: nextActiveId,
+        exercises: prev.exercises.map(e => {
+          if (e.id !== prev.activeExerciseId) return e;
+          
+          const updatedTeams = teams.map(t => {
+            const existingTeam = e.teams.find(et => et.id === t.id);
+            return {
+              ...t,
+              playerIds: t.playerIds || [],
+              score: existingTeam ? existingTeam.score : 0
+            };
+          });
 
-        return {
-          ...e,
-          name,
-          icon,
-          teams: updatedTeams,
-          sortByScore,
-          showTimer,
-          defaultTimerMinutes,
-          defaultTimerSeconds,
-          jokerPlayerIds,
-          pointsConfig,
-          updatedAt: Date.now(),
-          periodId: periodId || e.periodId,
-          sessionId: sessionId || (activeSessionId || e.sessionId)
-        };
-      }),
-      sessions: linkToMomentId && activeSessionId 
-        ? prev.sessions.map(s => s.id === activeSessionId 
-            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: (prev.activeExerciseId || '') } : m), updatedAt: Date.now() } 
-            : s)
-        : prev.sessions
-    }));
+          return {
+            ...e,
+            name,
+            icon,
+            teams: updatedTeams,
+            sortByScore,
+            showTimer,
+            defaultTimerMinutes,
+            defaultTimerSeconds,
+            jokerPlayerIds,
+            pointsConfig,
+            updatedAt: Date.now(),
+            periodId: periodId || e.periodId,
+            sessionId: sessionId || (activeSessionId || e.sessionId)
+          };
+        }),
+        sessions: linkToMomentId && activeSessionId 
+          ? prev.sessions.map(s => s.id === activeSessionId 
+              ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: (prev.activeExerciseId || '') } : m), updatedAt: Date.now() } 
+              : s)
+          : prev.sessions
+      };
+    });
     setSessionActionCount(prev => prev + 1);
     setIsEditingActiveExercise(false);
     
@@ -869,6 +880,7 @@ export default function App() {
     // Clean up common setup states
     setLinkToMomentId(null);
     setPrefilledName(null);
+    setPreviousActiveExerciseId(undefined);
   };
 
   const updateTeamColor = (teamId: string, color: string) => {
@@ -1623,7 +1635,7 @@ export default function App() {
                 </span>
                 {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training') && (
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
-                    {view === 'squad' ? 'Hantera spelare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Kalender & Tävlingsmoment' : 'Webb & Kalender'}
+                    {view === 'squad' ? 'Hantera spelare & ledare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Översikt & Planering' : 'Webb & Kalender'}
                   </span>
                 )}
               </div>
@@ -1718,6 +1730,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => {
+                      setPreviousActiveExerciseId(activeExerciseId);
                       setEditReturnView('exercise');
                       setIsEditingActiveExercise(true);
                       setView('setup');
@@ -1855,6 +1868,7 @@ export default function App() {
                     }
                   }}
                   onEditExercise={(id) => {
+                    setPreviousActiveExerciseId(activeExerciseId);
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setEditReturnView(activeExerciseId === id ? 'exercise' : 'training');
                     setIsEditingActiveExercise(true);
@@ -1864,7 +1878,12 @@ export default function App() {
                     setData(prev => ({ ...prev, exercises: reordered }));
                     setSessionActionCount(prev => prev + 1);
                   }}
-                  onNewExercise={() => setView('setup')}
+                  onNewExercise={() => {
+                    setPreviousActiveExerciseId(activeExerciseId);
+                    setEditReturnView('training');
+                    setIsEditingActiveExercise(false);
+                    setView('setup');
+                  }}
                   onNewSession={onNewSession}
                   onAddSessionsBatch={onAddSessionsBatch}
                   onSelectSession={(id, initialTab) => {
@@ -1926,6 +1945,36 @@ export default function App() {
                     }
                   }
                 }}
+                onAddSquadPlayerToAttendance={(playerId) => {
+                  if (effectiveSessionId) {
+                    const sessionToUpdate = sessions.find(s => s.id === effectiveSessionId);
+                    if (sessionToUpdate) {
+                      const currentAttendance = sessionToUpdate.attendance || [];
+                      if (!currentAttendance.includes(playerId)) {
+                        onUpdateSession({
+                          ...sessionToUpdate,
+                          attendance: [...currentAttendance, playerId],
+                          updatedAt: Date.now()
+                        });
+                      }
+                    }
+                  }
+                }}
+                onRemovePlayerFromAttendance={(playerId) => {
+                  if (effectiveSessionId) {
+                    const sessionToUpdate = sessions.find(s => s.id === effectiveSessionId);
+                    if (sessionToUpdate) {
+                      const currentAttendance = sessionToUpdate.attendance || [];
+                      const isGuest = playerId.startsWith('guest_');
+                      onUpdateSession({
+                        ...sessionToUpdate,
+                        attendance: currentAttendance.filter(id => id !== playerId),
+                        guestPlayers: isGuest ? (sessionToUpdate.guestPlayers || []).filter(p => p.id !== playerId) : sessionToUpdate.guestPlayers,
+                        updatedAt: Date.now()
+                      });
+                    }
+                  }
+                }}
                 initialGame={isEditingActiveExercise 
                   ? exerciseBeingEdited 
                   : (prefilledName ? { name: prefilledName, teams: [], icon: 'Dribbble' } as any : undefined)
@@ -1934,13 +1983,18 @@ export default function App() {
                   if (editReturnView) {
                     setView(editReturnView);
                     setEditReturnView(null);
-                  } else if (activeExerciseId) {
+                  } else if (previousActiveExerciseId) {
                     setView('exercise');
                   } else {
                     setView('training');
                   }
+                  if (previousActiveExerciseId !== undefined) {
+                    setData(prev => ({ ...prev, activeExerciseId: previousActiveExerciseId }));
+                    setPreviousActiveExerciseId(undefined);
+                  }
                   setIsEditingActiveExercise(false);
                   setPrefilledName(null);
+                  setLinkToMomentId(null);
                 }} 
               />
             );
@@ -2284,7 +2338,7 @@ export default function App() {
                       </span>
                       
                       <div className="flex flex-wrap gap-1 items-center min-h-[22px]">
-                        {(jokers as string[]).map((id: string) => {
+                        {Array.from(new Set(jokers as string[])).map((id: string) => {
                           const player = combinedExerciseSquad.find(p => p.id === id);
                           if (!player) return null;
                           return (
@@ -2446,6 +2500,48 @@ export default function App() {
             onClose={() => setShowTeamOverview(false)}
             exercises={data.exercises}
             onCopyTeams={(sourceId) => copyTeams(sourceId, activeExercise.id)}
+            onAddGuest={(name, position) => {
+              const session = sessions.find(s => s.id === activeExercise.sessionId);
+              if (session) {
+                const newGuest = {
+                  id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                  name: name.trim(),
+                  position: position || undefined,
+                };
+                onUpdateSession({
+                  ...session,
+                  guestPlayers: [...(session.guestPlayers || []), newGuest],
+                  attendance: [...(session.attendance || []), newGuest.id],
+                  updatedAt: Date.now()
+                });
+              }
+            }}
+            onAddSquadPlayerToAttendance={(playerId) => {
+              const session = sessions.find(s => s.id === activeExercise.sessionId);
+              if (session) {
+                const currentAttendance = session.attendance || [];
+                if (!currentAttendance.includes(playerId)) {
+                  onUpdateSession({
+                    ...session,
+                    attendance: [...currentAttendance, playerId],
+                    updatedAt: Date.now()
+                  });
+                }
+              }
+            }}
+            onRemovePlayerFromAttendance={(playerId) => {
+              const session = sessions.find(s => s.id === activeExercise.sessionId);
+              if (session) {
+                const currentAttendance = session.attendance || [];
+                const isGuest = playerId.startsWith('guest_');
+                onUpdateSession({
+                  ...session,
+                  attendance: currentAttendance.filter(id => id !== playerId),
+                  guestPlayers: isGuest ? (session.guestPlayers || []).filter(p => p.id !== playerId) : session.guestPlayers,
+                  updatedAt: Date.now()
+                });
+              }
+            }}
           />
         )}
       </AnimatePresence>
@@ -2470,8 +2566,10 @@ export default function App() {
               setLinkToMomentId(null);
             }}
             onCreateExercise={(name, momentId) => {
+              setPreviousActiveExerciseId(activeExerciseId);
               setLinkToMomentId(momentId);
               setPrefilledName(name || 'Nytt tävlingsmoment');
+              setEditReturnView('training');
               setIsEditingActiveExercise(false);
               setView('setup');
               setSessionActionCount(prev => prev + 1);
@@ -2484,7 +2582,9 @@ export default function App() {
               // We DON'T call setActiveSessionId(null) here because we want to come back to it
             }}
             onEditExercise={(id) => {
+              setPreviousActiveExerciseId(activeExerciseId);
               setData(prev => ({ ...prev, activeExerciseId: id }));
+              setEditReturnView('training');
               setIsEditingActiveExercise(true);
               setView('setup');
               setSessionActionCount(prev => prev + 1);

@@ -39,7 +39,11 @@ export default function PlayerCard({
   const [isOver, setIsOver] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
 
-  const teamPlayers = squad.filter(p => team.playerIds.includes(p.id));
+  const teamPlayers = Array.from(
+    new Map(
+      squad.filter(p => team.playerIds.includes(p.id)).map(p => [p.id, p])
+    ).values()
+  );
   const isThisPlayerDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
 
   useLayoutEffect(() => {

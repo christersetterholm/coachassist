@@ -497,7 +497,7 @@ export default function MobileCalendarView({
         >
           <HelpCircle size={12} className={activeFilter === 'other' ? 'text-white' : 'text-amber-500'} />
           <span>Övrigt</span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${activeFilter === 'other' ? 'bg-white/20 text-white' : 'bg-amber-50 dark:bg-amber-955/30 text-amber-650'}`}>{stats.other}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${activeFilter === 'other' ? 'bg-white/20 text-white' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600'}`}>{stats.other}</span>
         </button>
       </div>
 
@@ -561,7 +561,7 @@ export default function MobileCalendarView({
                       key={`empty-${day.dayNumber}`}
                       className={`flex items-center min-h-[44px] px-4 py-2 transition-colors gap-2 ${
                         isWeekend 
-                          ? 'bg-zinc-50/20 dark:bg-zinc-955/10' 
+                          ? 'bg-zinc-200/65 dark:bg-zinc-50/15' 
                           : 'bg-white dark:bg-zinc-900'
                       }`}
                     >
@@ -624,7 +624,7 @@ export default function MobileCalendarView({
                           isExpanded
                             ? 'bg-zinc-50 dark:bg-zinc-850/40'
                             : isWeekend 
-                              ? 'bg-zinc-50/15 dark:bg-zinc-955/15 hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20' 
+                              ? 'bg-zinc-200/65 dark:bg-zinc-50/15 hover:bg-zinc-200/85 dark:hover:bg-zinc-50/25' 
                               : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50/55 dark:hover:bg-zinc-850/20'
                         }`}
                       >
@@ -697,9 +697,23 @@ export default function MobileCalendarView({
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="bg-zinc-50/50 dark:bg-zinc-955/20 border-t border-zinc-100 dark:border-zinc-805/70 overflow-hidden w-full"
+                            className="bg-zinc-50/50 dark:bg-zinc-900/30 border-t border-zinc-100 dark:border-zinc-800/70 overflow-hidden w-full"
                           >
                             <div className="p-4 text-xs font-medium space-y-4 text-left">
+                              {/* Action buttons (Öppna Planering) */}
+                              <div className="flex items-center justify-start pb-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectSession(session.id);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 text-[10px] uppercase shadow-md shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer inline-flex"
+                                >
+                                  <span>Öppna Planering</span>
+                                  <ArrowRight size={11} strokeWidth={2.5} />
+                                </button>
+                              </div>
+
                               <div 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -774,12 +788,12 @@ export default function MobileCalendarView({
                               </div>
 
                               {session.notes ? (
-                                <div className="bg-amber-50/40 dark:bg-amber-955/20 border border-amber-150/40 dark:border-amber-900/40 p-3.5 rounded-xl shadow-sm mt-1">
-                                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-100/50 dark:border-amber-900/30 pb-1.5">
+                                <div className="bg-amber-50/75 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/60 p-3.5 rounded-xl shadow-sm mt-1.5">
+                                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-750 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-200/30 dark:border-amber-900/30 pb-1.5">
                                     <FileText size={11} className="text-amber-500" />
                                     <span>Syfte & Anteckningar</span>
                                   </div>
-                                  <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
+                                  <p className="text-zinc-800 dark:text-zinc-200 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
                                     {renderTextWithLinks(session.notes || '')}
                                   </p>
                                 </div>
@@ -796,19 +810,6 @@ export default function MobileCalendarView({
                                   </p>
                                 </div>
                               ) : null}
-
-                              <div className="flex items-center justify-end gap-2 pt-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSelectSession(session.id);
-                                  }}
-                                  className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 text-[10px] uppercase shadow-md transition-all active:scale-95"
-                                >
-                                  <span>Öppna planering / redigera</span>
-                                  <ArrowRight size={11} strokeWidth={2.5} />
-                                </button>
-                              </div>
                             </div>
                           </motion.div>
                         )}
@@ -1018,6 +1019,20 @@ export default function MobileCalendarView({
                             className="bg-zinc-50/60 dark:bg-zinc-950/25 border-t border-zinc-100 dark:border-zinc-805/70 overflow-hidden"
                           >
                             <div className="p-4 text-xs font-medium space-y-4">
+                              {/* Action buttons (Öppna Planering) */}
+                              <div className="flex items-center justify-start pb-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectSession(session.id);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 text-[10px] uppercase shadow-md shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer inline-flex"
+                                >
+                                  <span>Öppna Planering</span>
+                                  <ArrowRight size={11} strokeWidth={2.5} />
+                                </button>
+                              </div>
+
                               {/* Attendance snapshot */}
                               <div 
                                 onClick={(e) => {
@@ -1065,28 +1080,16 @@ export default function MobileCalendarView({
                                 </div>
                               </div>
 
-                              {/* Expand further link / Planning view link */}
-                              <div className="flex items-center justify-end gap-2 pt-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSelectSession(session.id);
-                                  }}
-                                  className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 text-[10px] uppercase shadow-md transition-all active:scale-95"
-                                >
-                                  <span>Öppna planering / redigera</span>
-                                  <ArrowRight size={11} strokeWidth={2.5} />
-                                </button>
-                              </div>
+
 
                               {/* Syfte & Anteckningar (Coach notes) */}
                               {session.notes ? (
-                                <div className="bg-amber-50/40 dark:bg-amber-955/20 border border-amber-150/40 dark:border-amber-900/40 p-3.5 rounded-xl shadow-sm mt-1">
-                                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-100/50 dark:border-amber-900/30 pb-1.5">
+                                <div className="bg-amber-50/75 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/60 p-3.5 rounded-xl shadow-sm mt-1.5">
+                                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-750 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-200/30 dark:border-amber-900/30 pb-1.5">
                                     <FileText size={11} className="text-amber-500" />
                                     <span>Syfte & Anteckningar</span>
                                   </div>
-                                  <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
+                                  <p className="text-zinc-800 dark:text-zinc-200 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
                                     {renderTextWithLinks(session.notes || '')}
                                   </p>
                                 </div>

@@ -400,6 +400,21 @@ function SessionItem({
             className="bg-zinc-50/60 dark:bg-zinc-950/25 border-t border-zinc-100 dark:border-zinc-805/70 overflow-hidden"
           >
             <div className="p-4 text-xs font-medium space-y-4">
+              {/* Action buttons (Öppna Planering) */}
+              <div className="flex items-center justify-start pb-1">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectSession(session.id);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 text-[10px] uppercase shadow-md shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer inline-flex"
+                >
+                  <span>Öppna Planering</span>
+                  <ArrowRight size={11} strokeWidth={2.5} />
+                </button>
+              </div>
+
               {/* Attendance snapshot */}
               <div 
                 onClick={(e) => {
@@ -410,7 +425,7 @@ function SessionItem({
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="font-black text-[9px] text-zinc-404 group-hover/attendance:text-indigo-650 dark:group-hover/attendance:text-indigo-400 uppercase tracking-widest transition-colors">Anmälda spelare</p>
-                  <span className="text-[10px] text-indigo-655 dark:text-indigo-400 font-extrabold flex items-center gap-0.5 opacity-0 group-hover/attendance:opacity-100 transition-opacity">
+                  <span className="text-[10px] text-indigo-654 dark:text-indigo-400 font-extrabold flex items-center gap-0.5 opacity-0 group-hover/attendance:opacity-100 transition-opacity">
                     Öppna deltagarlistan <ArrowRight size={10} />
                   </span>
                 </div>
@@ -423,7 +438,7 @@ function SessionItem({
                           {registeredPlayersCount} av {totalPlayersSquad}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-zinc-404 dark:text-zinc-500 text-[11px]">
+                      <div className="flex items-center justify-between text-zinc-404 dark:text-zinc-505 text-[11px]">
                         <span>Ledarnärvaro:</span>
                         <span>
                           {registeredLeadersCount} av {totalLeadersSquad}
@@ -447,29 +462,14 @@ function SessionItem({
                 </div>
               </div>
 
-              {/* Action buttons (Öppna planering / redigera) */}
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectSession(session.id);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 text-[10px] uppercase shadow-md transition-all active:scale-95 cursor-pointer inline-flex"
-                >
-                  <span>Öppna planering / redigera</span>
-                  <ArrowRight size={11} strokeWidth={2.5} />
-                </button>
-              </div>
-
               {/* Syfte & Anteckningar (Coach notes) */}
               {session.notes ? (
-                <div className="bg-amber-50/40 dark:bg-amber-955/20 border border-amber-150/40 dark:border-amber-900/40 p-3.5 rounded-xl shadow-sm mt-1">
-                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-100/50 dark:border-amber-900/30 pb-1.5">
+                <div className="bg-amber-50/75 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/60 p-3.5 rounded-xl shadow-sm mt-1.5">
+                  <div className="flex items-center gap-1.5 font-black text-[9px] text-amber-750 dark:text-amber-400 uppercase tracking-widest mb-2 border-b border-amber-200/30 dark:border-amber-900/30 pb-1.5">
                     <FileText size={11} className="text-amber-500" />
                     <span>Syfte & Anteckningar</span>
                   </div>
-                  <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
+                  <p className="text-zinc-805 dark:text-zinc-200 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
                     {renderTextWithLinks(session.notes || '')}
                   </p>
                 </div>
@@ -871,6 +871,7 @@ export default function TrainingManager({
           <TeamOverviewModal
             exercise={currentExerciseForTeams}
             squad={[...squad, ...(sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams))?.guestPlayers || [])]}
+            attendingIds={sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams))?.attendance}
             onMovePlayer={onMovePlayer}
             onClose={() => setSelectedExerciseForTeams(null)}
             exercises={exercises}
@@ -887,6 +888,32 @@ export default function TrainingManager({
                   ...session,
                   guestPlayers: [...(session.guestPlayers || []), newGuest],
                   attendance: [...(session.attendance || []), newGuest.id],
+                  updatedAt: Date.now()
+                });
+              }
+            }}
+            onAddSquadPlayerToAttendance={(playerId) => {
+              const session = sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams));
+              if (session) {
+                const currentAttendance = session.attendance || [];
+                if (!currentAttendance.includes(playerId)) {
+                  onUpdateSession({
+                    ...session,
+                    attendance: [...currentAttendance, playerId],
+                    updatedAt: Date.now()
+                  });
+                }
+              }
+            }}
+            onRemovePlayerFromAttendance={(playerId) => {
+              const session = sessions.find(s => s.moments.some(m => m.exerciseId === selectedExerciseForTeams));
+              if (session) {
+                const currentAttendance = session.attendance || [];
+                const isGuest = playerId.startsWith('guest_');
+                onUpdateSession({
+                  ...session,
+                  attendance: currentAttendance.filter(id => id !== playerId),
+                  guestPlayers: isGuest ? (session.guestPlayers || []).filter(p => p.id !== playerId) : session.guestPlayers,
                   updatedAt: Date.now()
                 });
               }

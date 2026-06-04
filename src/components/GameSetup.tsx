@@ -17,7 +17,8 @@ interface GameSetupProps {
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
     periodId?: string | null,
-    sessionId?: string | null
+    sessionId?: string | null,
+    shouldStart?: boolean
   ) => void;
   initialGame?: Exercise;
   onCancel?: () => void;
@@ -29,6 +30,8 @@ interface GameSetupProps {
   exercises?: Exercise[];
   currentPeriodId: string | null;
   onAddGuest?: (name: string, position?: string) => void;
+  onAddSquadPlayerToAttendance?: (playerId: string) => void;
+  onRemovePlayerFromAttendance?: (playerId: string) => void;
   key?: React.Key;
 }
 
@@ -40,7 +43,22 @@ const VEST_COLORS = [
   '#71717A', // Zinc
 ];
 
-export default function GameSetup({ onStartGame, initialGame, onCancel: _onCancel, squad = [], guestPlayers = [], sessionAttendance, activeSessionId, sessions, exercises = [], currentPeriodId, onAddGuest }: GameSetupProps) {
+export default function GameSetup({ 
+  onStartGame, 
+  initialGame, 
+  onCancel: _onCancel, 
+  squad = [], 
+  guestPlayers = [], 
+  sessionAttendance, 
+  activeSessionId, 
+  sessions, 
+  exercises = [], 
+  currentPeriodId, 
+  onAddGuest, 
+  onAddSquadPlayerToAttendance,
+  onRemovePlayerFromAttendance
+}: GameSetupProps) {
+  const submitShouldStartRef = React.useRef(false);
   const combinedSquad = [
     ...(squad || []).filter(p => p.role !== 'leader'), 
     ...(guestPlayers || []).filter(p => p.role !== 'leader')
@@ -93,6 +111,23 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
           { id: crypto.randomUUID(), name: 'Lag 2', color: VEST_COLORS[1], playerIds: [] },
         ]
   );
+
+  const assignedPlayerIds = new Set([
+    ...teams.flatMap(t => t.playerIds || []),
+    ...jokerPlayerIds
+  ]);
+
+  const unassignedPlayers = combinedSquad
+    .filter(p => {
+      if (!isAttendanceActive) return true;
+      const isGuest = p.id.startsWith('guest_');
+      return currentAttendanceIds.includes(p.id) || (isGuest && (guestPlayers || []).some(gp => gp.id === p.id));
+    })
+    .filter(p => !assignedPlayerIds.has(p.id));
+
+  const absentSquadPlayers = (squad || [])
+    .filter(p => p.role !== 'leader')
+    .filter(p => !currentAttendanceIds.includes(p.id));
 
   const adjustDefaultTime = (type: 'min' | 'sec', amount: number) => {
     if (type === 'min') {
@@ -162,11 +197,30 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
         });
       });
     } else {
-      for (let i = 0; i < count; i++) {
-        const nextColor = i < VEST_COLORS.length 
-          ? VEST_COLORS[i] 
-          : PRESET_COLORS[i % PRESET_COLORS.length];
-        newTeams.push({ id: crypto.randomUUID(), name: '', color: nextColor, playerIds: [] });
+      const currentTeams = [...teams];
+      if (currentTeams.length > 0) {
+        if (count > currentTeams.length) {
+          // Keep existing teams
+          newTeams.push(...currentTeams);
+          // Add remaining teams as empty
+          for (let i = currentTeams.length; i < count; i++) {
+            const nextColor = i < VEST_COLORS.length 
+              ? VEST_COLORS[i] 
+              : PRESET_COLORS[i % PRESET_COLORS.length];
+            newTeams.push({ id: crypto.randomUUID(), name: '', color: nextColor, playerIds: [] });
+          }
+        } else {
+          // Keep the first count teams
+          newTeams.push(...currentTeams.slice(0, count));
+        }
+      } else {
+        // Fallback if there are no teams in the state yet
+        for (let i = 0; i < count; i++) {
+          const nextColor = i < VEST_COLORS.length 
+            ? VEST_COLORS[i] 
+            : PRESET_COLORS[i % PRESET_COLORS.length];
+          newTeams.push({ id: crypto.randomUUID(), name: '', color: nextColor, playerIds: [] });
+        }
       }
     }
     setTeams(newTeams);
@@ -284,6 +338,14 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
         ? prev.filter(id => id !== playerId)
         : [...prev, playerId]
     );
+  };
+
+  const handleRemovePlayerFromAttendance = (playerId: string) => {
+    if (activeSessionId && onRemovePlayerFromAttendance) {
+      onRemovePlayerFromAttendance(playerId);
+    } else {
+      setStandaloneAttendance(prev => prev.filter(id => id !== playerId));
+    }
   };
 
   const _distributePlayers = (attendingPlayers: SquadPlayer[]) => {
@@ -432,8 +494,11 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
       jokerPlayerIds, 
       pointsConfig,
       initialGame ? initialGame.periodId : currentPeriodId,
-      initialGame ? initialGame.sessionId : (sessionAttendance ? 'active' : null) // Using 'active' as a placeholder if we're in session mode
+      initialGame ? initialGame.sessionId : (sessionAttendance ? 'active' : null), // Using 'active' as a placeholder if we're in session mode
+      submitShouldStartRef.current
     );
+    // Reset back to default
+    submitShouldStartRef.current = false;
   };
 
   return (
@@ -759,80 +824,153 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
 
             <div className="space-y-4">
               {onAddGuest && (
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Provspelare / Gäster</span>
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Spelare & Gäster</span>
                   </div>
+                  
                   {!showGuestInput ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowGuestInput(true)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 transition-all shadow-sm"
-                    >
-                      <UserPlus size={16} />
-                      Skapa ny gästspelare
-                    </button>
-                  ) : (
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        autoFocus
-                        type="text"
-                        value={guestName}
-                        onChange={(e) => setGuestName(e.target.value)}
-                        placeholder="Namn..."
-                        className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (guestName.trim()) {
-                              onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
-                              setGuestName("");
-                              setGuestPosition("");
-                              setShowGuestInput(false);
-                            }
-                          }
-                        }}
-                      />
-                      <select
-                        value={guestPosition}
-                        onChange={(e) => setGuestPosition(e.target.value)}
-                        className="bg-white dark:bg-zinc-900 border border-zinc-205 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                    <div className={`grid grid-cols-1 ${absentSquadPlayers.length > 0 ? 'sm:grid-cols-2' : ''} gap-3`}>
+                      <button
+                        type="button"
+                        onClick={() => setShowGuestInput(true)}
+                        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm cursor-pointer text-left"
                       >
-                        <option value="">Position (Valfritt)</option>
-                        <option value="MV">Målvakt (MV)</option>
-                        <option value="MB">Mittback (MB)</option>
-                        <option value="YB">Ytterback (YB)</option>
-                        <option value="MF">Mittfältare (MF)</option>
-                        <option value="YMF">Yttermittfältare (YMF)</option>
-                        <option value="FW">Forward (FW)</option>
-                      </select>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (guestName.trim()) {
-                              onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
-                              setGuestName("");
-                              setGuestPosition("");
-                              setShowGuestInput(false);
+                        <UserPlus size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+                        <span>Skapa gästspelare</span>
+                      </button>
+
+                      {absentSquadPlayers.length > 0 && (
+                        <div className="relative w-full">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                            <Users size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val) {
+                                if (activeSessionId && onAddSquadPlayerToAttendance) {
+                                  onAddSquadPlayerToAttendance(val);
+                                } else {
+                                  setStandaloneAttendance(prev => [...prev, val]);
+                                }
+                              }
+                            }}
+                            className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
+                          >
+                            <option value="">Hämta från truppen...</option>
+                            {absentSquadPlayers.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} {p.position ? `(${p.position})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400 dark:text-zinc-500">
+                            <ChevronDown size={14} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="space-y-3 w-full">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={guestName}
+                          onChange={(e) => setGuestName(e.target.value)}
+                          placeholder="Namn..."
+                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (guestName.trim()) {
+                                onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
+                                setGuestName("");
+                                setGuestPosition("");
+                                setShowGuestInput(false);
+                              }
                             }
                           }}
-                          className="flex-1 shrink-0 bg-indigo-600 text-white px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-sm whitespace-nowrap"
-                        >
-                          Lägg till
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowGuestInput(false);
-                            setGuestName("");
-                            setGuestPosition("");
-                          }}
-                          className="p-2 text-zinc-400 hover:text-red-500"
-                        >
-                          <X size={20} />
-                        </button>
+                        />
+                        <div className="grid grid-cols-2 gap-2 w-full">
+                          <select
+                            value={guestPosition}
+                            onChange={(e) => setGuestPosition(e.target.value)}
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-205 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                          >
+                            <option value="">Position (Valfritt)</option>
+                            <option value="MV">Målvakt (MV)</option>
+                            <option value="MB">Mittback (MB)</option>
+                            <option value="YB">Ytterback (YB)</option>
+                            <option value="MF">Mittfältare (MF)</option>
+                            <option value="YMF">Yttermittfältare (YMF)</option>
+                            <option value="FW">Forward (FW)</option>
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (guestName.trim()) {
+                                  onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
+                                  setGuestName("");
+                                  setGuestPosition("");
+                                  setShowGuestInput(false);
+                                }
+                              }}
+                              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-sm whitespace-nowrap cursor-pointer flex items-center justify-center py-2"
+                            >
+                              Lägg till
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowGuestInput(false);
+                                setGuestName("");
+                                setGuestPosition("");
+                              }}
+                              className="p-2 text-zinc-400 hover:text-red-500 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 cursor-pointer flex items-center justify-center shrink-0"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
                       </div>
+
+                      {absentSquadPlayers.length > 0 && (
+                        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-850">
+                          <div className="relative w-full">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                              <Users size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+                            </div>
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val) {
+                                  if (activeSessionId && onAddSquadPlayerToAttendance) {
+                                    onAddSquadPlayerToAttendance(val);
+                                  } else {
+                                    setStandaloneAttendance(prev => [...prev, val]);
+                                  }
+                                }
+                              }}
+                              className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
+                            >
+                              <option value="">Hämta från truppen...</option>
+                              {absentSquadPlayers.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {p.position ? `(${p.position})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400 dark:text-zinc-500">
+                              <ChevronDown size={14} />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1049,7 +1187,7 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
               )}
             </div>
 
-            {(teams.some(t => t.playerIds.length > 0) || jokerPlayerIds.length > 0) && (
+            {combinedSquad.length > 0 && (
               <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl p-6 border border-zinc-100 dark:border-zinc-800 space-y-4">
                 <div className="flex items-center gap-2 mb-2">
                   <LayoutList size={18} className="text-zinc-400" />
@@ -1094,8 +1232,21 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
                                 className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
                                 style={{ backgroundColor: team.color }}
                               >
-                                {player.name}
-                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                <div className="flex items-center gap-1">
+                                  <span>{player.name}</span>
+                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      movePlayerInternal(pid, 'none');
+                                    }}
+                                    className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center text-white"
+                                    title="Ta bort från lag"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
                               </motion.div>
                             ) : null;
                           })}
@@ -1145,13 +1296,89 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
                                 }}
                                 className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
                               >
-                                {player.name}
-                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                <div className="flex items-center gap-1">
+                                  <span>{player.name}</span>
+                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      movePlayerInternal(pid, 'none');
+                                    }}
+                                    className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center text-white"
+                                    title="Ta bort från jokrar"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
                               </motion.div>
                             ) : null;
                           })}
                           {jokerPlayerIds.length === 0 && (
                             <div className="w-full py-2 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-indigo-400 uppercase tracking-widest pointer-events-none">
+                              Dra hit
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {(() => {
+                    const isUnassignedDragging = draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId);
+                    return (
+                      <div 
+                        key="unassigned-overview"
+                        data-overview-team-id="none"
+                        className={`bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-2xl shadow-sm border border-dashed transition-all duration-200 flex flex-col h-full ${draggedPlayerId ? 'scale-[1.02] border-zinc-300 dark:border-zinc-700 opacity-60' : 'border-zinc-205 dark:border-zinc-800'}`}
+                        style={{ zIndex: isUnassignedDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-3 h-3 rounded-full border border-zinc-400 dark:border-zinc-650" />
+                          <span className="font-black text-sm text-zinc-500 dark:text-zinc-400 uppercase tracking-tight flex-1">Ej indelade / Avbytare</span>
+                          <span className="text-[10px] bg-zinc-200/55 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded-full font-bold">
+                            {unassignedPlayers.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
+                          {sortPlayersByPosition(unassignedPlayers.map(p => p.id), combinedSquad).map(pid => {
+                            const player = combinedSquad.find(p => p.id === pid);
+                            return player ? (
+                              <motion.div 
+                                key={pid} 
+                                drag
+                                dragSnapToOrigin
+                                whileDrag={{ 
+                                  zIndex: 9999, 
+                                  scale: 1.1,
+                                  pointerEvents: 'none'
+                                }}
+                                onDragStart={() => setDraggedPlayerId(pid)}
+                                onDragEnd={(e: any, info) => {
+                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
+                                }}
+                                className={`pl-2 pr-1 py-1 rounded-md text-[11px] font-bold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-850 border border-zinc-150 dark:border-zinc-800 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300 dark:hover:border-zinc-750`} 
+                              >
+                                <span>{player.name}</span>
+                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                <button
+                                  type="button"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemovePlayerFromAttendance(pid);
+                                  }}
+                                  className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 rounded transition-colors cursor-pointer shrink-0 ml-0.5"
+                                  title="Ta bort från närvaro"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </motion.div>
+                            ) : null;
+                          })}
+                          {unassignedPlayers.length === 0 && (
+                            <div className="w-full py-2 border border-dashed border-zinc-200/50 dark:border-zinc-800/50 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-none">
                               Dra hit
                             </div>
                           )}
@@ -1347,6 +1574,9 @@ export default function GameSetup({ onStartGame, initialGame, onCancel: _onCance
 
           <button
             type="submit"
+            onClick={() => {
+              submitShouldStartRef.current = !initialGame;
+            }}
             className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-xl flex items-center justify-center gap-3 hover:bg-indigo-700 active:scale-[0.98] transition-all shadow-lg shadow-indigo-200 dark:shadow-none"
           >
             {initialGame ? (
