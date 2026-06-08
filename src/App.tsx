@@ -1081,10 +1081,11 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
-  const onDeleteSessionPermanent = (id: string) => {
+  const onDeleteSessionPermanent = (ids: string | string[]) => {
+    const idArray = Array.isArray(ids) ? ids : [ids];
     setData(prev => ({
       ...prev,
-      deletedSessions: (prev.deletedSessions || []).filter(s => s.id !== id)
+      deletedSessions: (prev.deletedSessions || []).filter(s => !idArray.includes(s.id))
     }));
     setSessionActionCount(prev => prev + 1);
   };

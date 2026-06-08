@@ -22,7 +22,7 @@ interface TrainingManagerProps {
   onSelectSession: (id: string, initialTab?: 'schema' | 'attendance') => void;
   onDeleteSession: (id: string) => void;
   onRestoreSession?: (id: string) => void;
-  onDeleteSessionPermanent?: (id: string) => void;
+  onDeleteSessionPermanent?: (ids: string | string[]) => void;
   onCopySession: (id: string) => void;
   onReorderSessions: (sessions: TrainingSession[]) => void;
   onUpdateSession: (updated: TrainingSession) => void;
@@ -524,6 +524,8 @@ export default function TrainingManager({
   isCloudDataLoaded = true
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
+  const [showClearTrashConfirm, setShowClearTrashConfirm] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showTrashModal, setShowTrashModal] = useState(false);
@@ -629,6 +631,7 @@ export default function TrainingManager({
   const [localEndTime, setLocalEndTime] = useState(settings?.defaultEndTime || '19:30');
   
   const [localIcsUrl, setLocalIcsUrl] = useState(settings?.icsUrl || '');
+  const [forceOverwrite, setForceOverwrite] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [hasAutoSynced, setHasAutoSynced] = useState(false);
@@ -714,8 +717,7 @@ export default function TrainingManager({
             (matchedSession.moments && matchedSession.moments.length > 0) ||
             (matchedSession.notes && matchedSession.notes.trim() !== '') ||
             matchedSession.isStarted ||
-            matchedSession.isPlanned ||
-            matchedSession.isLocallyEdited;
+            (!forceOverwrite && (matchedSession.isPlanned || matchedSession.isLocallyEdited));
 
           if (isPlannedActive) {
             skippedCount++;
@@ -1296,6 +1298,25 @@ export default function TrainingManager({
                   <p className="text-[10px] text-zinc-400 mt-1.5 leading-relaxed">
                     Klistra in lagets prenumerationslänk (webcal/ics) från laget.se. Träningspass och matcher synkas då automatiskt.
                   </p>
+                  
+                  {localIcsUrl && (
+                    <div className="mt-3.5 p-3 bg-zinc-50 dark:bg-zinc-950/30 rounded-xl border border-zinc-150 dark:border-zinc-800 flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        id="forceOverwrite"
+                        checked={forceOverwrite}
+                        onChange={(e) => setForceOverwrite(e.target.checked)}
+                        className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-650 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                      />
+                      <label htmlFor="forceOverwrite" className="text-xs font-bold text-zinc-750 dark:text-zinc-250 leading-tight cursor-pointer select-none">
+                        Tvinga överskrivning av befintliga pass
+                        <span className="block text-[10px] font-normal text-zinc-450 dark:text-zinc-500 mt-1 leading-normal">
+                          Aktivera om du vill läsa in samlingstider och ny beskrivnings-info för matcher som redan har synkats in tidigare.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
                   {localIcsUrl && (
                     <button
                       type="button"
@@ -1344,11 +1365,7 @@ export default function TrainingManager({
                       <span>Papperskorg ({deletedSessions.length})</span>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm("Vill du rensa hela papperskorgen permanent?")) {
-                            deletedSessions.forEach(s => onDeleteSessionPermanent?.(s.id));
-                          }
-                        }}
+                        onClick={() => setShowClearTrashConfirm(true)}
                         className="text-[9px] font-black text-red-500 hover:text-red-700 uppercase tracking-wider cursor-pointer"
                       >
                         Töm papperskorgen
@@ -1376,7 +1393,7 @@ export default function TrainingManager({
                             <button
                               type="button"
                               onClick={() => {
-                                onDeleteSessionPermanent?.(deletedSession.id);
+                                setSessionToPermanentDelete(deletedSession.id);
                               }}
                               className="p-1 text-zinc-400 hover:text-red-500 rounded transition-all cursor-pointer"
                               title="Ta bort permanent"
@@ -1460,11 +1477,7 @@ export default function TrainingManager({
                       <span>Raderade pass ({deletedSessions.length})</span>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm("Vill du rensa hela papperskorgen permanent? Denna åtgärd går inte att ångra.")) {
-                            deletedSessions.forEach(s => onDeleteSessionPermanent?.(s.id));
-                          }
-                        }}
+                        onClick={() => setShowClearTrashConfirm(true)}
                         className="text-red-500 hover:text-red-750 transition-colors cursor-pointer text-[10px]"
                       >
                         Töm papperskorgen
@@ -1507,9 +1520,7 @@ export default function TrainingManager({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (confirm(`Vill du ta bort "${deletedSession.title}" permanent?`)) {
-                                    onDeleteSessionPermanent?.(deletedSession.id);
-                                  }
+                                  setSessionToPermanentDelete(deletedSession.id);
                                 }}
                                 className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-all cursor-pointer"
                                 title="Ta bort permanent"
@@ -1595,6 +1606,102 @@ export default function TrainingManager({
             </motion.div>
           );
         })()}
+      </AnimatePresence>
+
+      {/* Permanent Delete Confirmation Modal */}
+      <AnimatePresence>
+        {sessionToPermanentDelete && (() => {
+          const sessionToDeleteData = deletedSessions.find(s => s.id === sessionToPermanentDelete);
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4"
+              onClick={() => setSessionToPermanentDelete(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 uppercase tracking-tight">
+                  Ta bort permanent?
+                </h3>
+                <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm font-medium leading-relaxed">
+                  Är du säker på att du vill ta bort "{sessionToDeleteData?.title}" permanent? Denna åtgärd går inte att ångra och passet försvinner helt från papperskorgen.
+                </p>
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    onClick={() => {
+                      if (sessionToPermanentDelete) {
+                        onDeleteSessionPermanent?.(sessionToPermanentDelete);
+                        setSessionToPermanentDelete(null);
+                      }
+                    }}
+                    className="w-full py-3 bg-red-650 hover:bg-red-700 text-red-600 dark:text-red-400 bg-red-650/10 hover:bg-red-650/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/40 bg-zinc-50 dark:bg-zinc-800  py-3 text-sm font-bold rounded-xl transition-colors"
+                  >
+                    Ja, ta bort permanent
+                  </button>
+                  <button
+                    onClick={() => setSessionToPermanentDelete(null)}
+                    className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors text-sm"
+                  >
+                    Avbryt
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* Töm Papperskorg Confirmation Modal */}
+      <AnimatePresence>
+        {showClearTrashConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4 bg-opacity-75"
+            onClick={() => setShowClearTrashConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 uppercase tracking-tight">
+                Töm papperskorgen?
+              </h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm font-medium leading-relaxed">
+                Är du säker på att du vill rensa hela papperskorgen permanent? Alla {deletedSessions.length} pass tas bort permanent. Denna åtgärd går inte att ångra.
+              </p>
+              <div className="flex flex-col gap-2.5">
+                <button
+                  onClick={() => {
+                    const idsToPermanentDelete = deletedSessions.map(s => s.id);
+                    onDeleteSessionPermanent?.(idsToPermanentDelete);
+                    setShowClearTrashConfirm(false);
+                  }}
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2"
+                >
+                  Ja, töm papperskorgen
+                </button>
+                <button
+                  onClick={() => setShowClearTrashConfirm(false)}
+                  className="w-full py-3 bg-zinc-100 dark:bg-zinc-805 text-zinc-650 text-zinc-600 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors text-sm"
+                >
+                  Avbryt
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Series Training Session Modal */}

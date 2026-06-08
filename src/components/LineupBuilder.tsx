@@ -1926,8 +1926,58 @@ export default function LineupBuilder({
     }
   };
 
-  const handleSave = () => {
-    setIsEditingTitle(false);
+  const handleSave = (title: string = tempTitle, team: string = tempTeamName) => {
+    const idToUpdate = editingLineupId || lineup?.id;
+    
+    if (!idToUpdate) {
+      const newLineup: Lineup = {
+        id: crypto.randomUUID(),
+        matchTitle: title || 'Ny Laguppställning',
+        teamName: team || 'Ditt Lag',
+        date: Date.now(),
+        players: [],
+        playerScale: 1,
+        nameTagStyle: 'light',
+        notes: {
+          team: { text: teamNotes, media: teamMedia },
+          opponent: { text: opponentNotes, media: opponentMedia }
+        },
+        tacticalBoard: {
+          drawings: tacticalDrawings,
+          footballPos,
+          footballScale,
+          opponents,
+          showOpponents,
+          opponentColor,
+          players: tacticalPlayers
+        }
+      };
+      onSaveLineup(newLineup);
+      setLineupName(title || 'Ny Laguppställning');
+      setTeamName(team || 'Ditt Lag');
+      setIsEditingTitle(false);
+      setEditingLineupId(null);
+      return;
+    }
+
+    if (idToUpdate === lineup?.id) {
+      setLineupName(title);
+      setTeamName(team);
+      setHasUnsavedChanges(true); // Let the auto-save effect handle the construction of the object
+      setIsEditingTitle(false);
+      setEditingLineupId(null);
+    } else {
+      const target = lineups.find(x => x.id === idToUpdate);
+      if (target) {
+        onUpdateLineup({
+          ...target,
+          matchTitle: title,
+          teamName: team
+        });
+      }
+      setIsEditingTitle(false);
+      setEditingLineupId(null);
+    }
   };
 
   const openTitleEditForLineup = (id: string, currentTitle: string, currentTeam: string) => {
@@ -4872,9 +4922,7 @@ export default function LineupBuilder({
                     className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-lg font-bold outline-none focus:border-indigo-600 transition-colors"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        setLineupName(tempTitle);
-                        setTeamName(tempTeamName);
-                        handleSave();
+                        handleSave(tempTitle, tempTeamName);
                       }
                     }}
                   />
@@ -4891,29 +4939,7 @@ export default function LineupBuilder({
                   Avbryt
                 </button>
                 <button
-                  onClick={() => {
-                    const idToUpdate = editingLineupId || lineup?.id;
-                    if (!idToUpdate) return;
-
-                    if (idToUpdate === lineup?.id) {
-                      setLineupName(tempTitle);
-                      setTeamName(tempTeamName);
-                      setHasUnsavedChanges(true); // Let the auto-save effect handle the construction of the object
-                      setIsEditingTitle(false);
-                      setEditingLineupId(null);
-                    } else {
-                      const target = lineups.find(x => x.id === idToUpdate);
-                      if (target) {
-                        onUpdateLineup({
-                          ...target,
-                          matchTitle: tempTitle,
-                          teamName: tempTeamName
-                        });
-                      }
-                      setIsEditingTitle(false);
-                      setEditingLineupId(null);
-                    }
-                  }}
+                  onClick={() => handleSave(tempTitle, tempTeamName)}
                   className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
                 >
                   Spara

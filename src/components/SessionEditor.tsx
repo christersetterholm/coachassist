@@ -1710,12 +1710,12 @@ function ParticipantManager({
                     onClick={() => handleTogglePlayer(player.id)}
                     className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
                       isPresent 
-                        ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 shadow-sm' 
+                        ? 'bg-[#16A34A]/25 dark:bg-[#16A34A]/20 border-[#16A34A]/50 dark:border-[#16A34A]/40 shadow-sm' 
                         : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
                     }`}
                   >
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                      isPresent ? 'bg-emerald-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                      isPresent ? 'bg-[#16A34A] text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
                     }`}>
                       {player.photoUrl ? (
                         <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
@@ -1724,7 +1724,7 @@ function ParticipantManager({
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-emerald-950 dark:text-emerald-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                      <p className="text-xs font-black truncate uppercase text-zinc-900 dark:text-zinc-100">
                         {player.name}
                       </p>
                       {player.number && (
@@ -1764,7 +1764,7 @@ function ParticipantManager({
                         )}
                       </div>
                       <div className="min-w-0">
-                        <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                        <p className="text-xs font-black truncate uppercase text-zinc-900 dark:text-zinc-100">
                           {player.name}
                         </p>
                         <p className="text-[9px] font-bold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider">
@@ -1844,9 +1844,7 @@ function ParticipantManager({
                     <button
                       type="button"
                       onClick={() => handleTogglePlayer(guest.id)}
-                      className={`text-xs font-black truncate uppercase text-left w-full block hover:underline ${
-                        isPresent ? 'text-amber-900 dark:text-amber-100' : 'text-zinc-600 dark:text-zinc-400'
-                      }`}
+                      className="text-xs font-black truncate uppercase text-left w-full block hover:underline text-zinc-900 dark:text-zinc-100"
                     >
                       {guest.name}
                     </button>

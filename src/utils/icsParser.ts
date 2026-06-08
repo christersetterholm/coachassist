@@ -14,8 +14,8 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
   if (!icsData) return events;
 
   // Unfold folded lines (lines wrapped with a space or tab on the next line)
-  const unfolded = icsData.replace(/\r?\n[ \t]/g, '');
-  const lines = unfolded.split(/\r?\n/);
+  const unfolded = icsData.replace(/\r?\n[ \t]/g, '').replace(/\r[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n|\r|\n/);
   
   let currentEvent: {
     externalId?: string;
@@ -127,13 +127,26 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
         currentEvent.dtStartRaw = trimmed;
       } else if (key === 'DTEND') {
         currentEvent.dtEndRaw = trimmed;
-      } else if (key === 'DESCRIPTION') {
-        currentEvent.description = valuePart
+      } else if (key === 'DESCRIPTION' || key === 'COMMENT' || key.startsWith('X-ALT-DESC') || key.includes('SAMLING')) {
+        let val = valuePart
           .replace(/\\,/g, ',')
           .replace(/\\;/g, ';')
           .replace(/\\n/g, '\n')
           .replace(/\\r/g, '')
           .trim();
+        
+        // If it's a custom key containing SAMLING, label it clearly if it isn't already labeled
+        if (key.includes('SAMLING') && !val.toLowerCase().includes('samling')) {
+          val = `Samlingstid: ${val}`;
+        }
+
+        if (currentEvent.description) {
+          if (!currentEvent.description.includes(val)) {
+            currentEvent.description += '\n' + val;
+          }
+        } else {
+          currentEvent.description = val;
+        }
       }
     }
   }
