@@ -1587,7 +1587,7 @@ export default function App() {
     <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 h-[100dvh] overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
       {view !== 'lineup' && (
         <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 ${view === 'exercise' ? 'sticky top-0' : ''}`}>
-          <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
             <div 
               className={`flex items-center gap-3 cursor-pointer group min-w-0 ${view === 'lineup' ? 'hover:opacity-70' : ''}`}
               onClick={() => { 
@@ -1634,7 +1634,7 @@ export default function App() {
                   })()}
                 </span>
                 {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training') && (
-                  <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
+                  <span className="hidden sm:block text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
                     {view === 'squad' ? 'Hantera spelare & ledare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Översikt & Planering' : 'Webb & Kalender'}
                   </span>
                 )}

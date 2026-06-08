@@ -191,10 +191,10 @@ function MomentItem({
             <GripVertical size={24} />
           </div>
           
-          <div className="text-[10px] font-black flex flex-col items-center pointer-events-none mt-2">
-            <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded-md mb-0.5 whitespace-nowrap shadow-sm">{details.startTimeStr}</span>
-            <div className="w-px h-4 bg-zinc-100 dark:bg-zinc-800 my-0.5" />
-            <span className="bg-zinc-800 dark:bg-zinc-700 text-white px-1.5 py-0.5 rounded-md whitespace-nowrap shadow-sm">{details.endTimeStr}</span>
+          <div className={`font-black flex flex-col items-center pointer-events-none ${mode === 'live' ? 'mt-1 gap-1' : 'mt-2 text-[10px]'}`}>
+            <span className={`${mode === 'live' ? 'bg-indigo-600 text-white px-2.5 py-1 text-sm sm:text-base rounded-xl font-black shadow-md' : 'bg-indigo-600 text-white px-1.5 py-0.5 rounded-md mb-0.5'} whitespace-nowrap shadow-sm`}>{details.startTimeStr}</span>
+            <div className={`w-px bg-zinc-200 dark:bg-zinc-700 ${mode === 'live' ? 'h-3 my-0.5' : 'h-4 my-0.5'}`} />
+            <span className={`${mode === 'live' ? 'bg-zinc-800 dark:bg-zinc-700 text-white px-2.5 py-1 text-sm sm:text-base rounded-xl font-black shadow-md' : 'bg-zinc-800 dark:bg-zinc-700 text-white px-1.5 py-0.5 rounded-md'} whitespace-nowrap shadow-sm`}>{details.endTimeStr}</span>
           </div>
         </div>
         {/* Main moment info */}
@@ -215,8 +215,12 @@ function MomentItem({
                 </h4>
               )}
             </div>
-            <div className="flex items-center gap-1 bg-zinc-50 dark:bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-100 dark:border-zinc-800 shrink-0 w-fit">
-              <Clock size={12} className="text-zinc-400" />
+            <div className={`flex items-center gap-1 font-black shrink-0 w-fit ${
+              mode === 'live'
+                ? 'bg-indigo-100/80 dark:bg-indigo-900/40 border-2 border-indigo-200 dark:border-indigo-900/30 px-3 py-1.5 rounded-2xl scale-110 origin-right shadow-sm'
+                : 'bg-zinc-50 dark:bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-100 dark:border-zinc-800'
+            }`}>
+              <Clock size={mode === 'live' ? 14 : 12} className={mode === 'live' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-zinc-400'} />
               {mode === 'plan' ? (
                 <div className="relative flex items-center">
                   <select
@@ -230,9 +234,9 @@ function MomentItem({
                   </select>
                 </div>
               ) : (
-                <span className="text-sm font-black text-zinc-900 dark:text-white">{moment.duration}</span>
+                <span className={`font-black ${mode === 'live' ? 'text-lg text-indigo-700 dark:text-indigo-300' : 'text-sm text-zinc-900 dark:text-white'}`}>{moment.duration}</span>
               )}
-              <span className="text-[10px] font-bold text-zinc-400 uppercase">min</span>
+              <span className={`font-bold uppercase ${mode === 'live' ? 'text-[11px] text-indigo-600 dark:text-indigo-400' : 'text-[10px] text-zinc-400'}`}>min</span>
             </div>
           </div>
 
@@ -539,10 +543,10 @@ function MomentItem({
                   <>
                     <button
                       onClick={() => onSelectExercise(moment.exerciseId!)}
-                      className="bg-indigo-600 text-white px-5 py-2.5 rounded-2xl font-black text-xs flex items-center justify-center gap-3 shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-[0.98]"
+                      className="bg-indigo-600 text-white px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-[0.98]"
                     >
-                      <Play fill="currentColor" size={14} />
-                      STARTA TÄVLINGSMOMENT
+                      <Play fill="currentColor" size={12} />
+                      Starta tävling
                     </button>
                     <button
                       onClick={() => onShowTeams && onShowTeams(moment.exerciseId!)}
@@ -1439,6 +1443,50 @@ export default function SessionEditor({
     </div>
   );
 }
+
+function isValidPlayerName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+
+  // 1. Must contain at least one letter (a-z, including Swedish standard letters/accents)
+  if (!/[a-zåäöéèüíóáñæø]/i.test(trimmed)) {
+    return false;
+  }
+
+  // 2. Exact match check for common status words or phrases, including user specified words
+  const blockedExact = [
+    'ja', 'nej', 'kanske', 'deltar', 'deltar ej', 'ej svarat', 'anmäld', 'reserv',
+    'kommentar', 'svara', 'obesvarad', 'status', 'tid', 'plats', 'anmäld', 'avanmäld',
+    'gäst', 'gästspelare', 'provspelare', 'ledare', 'tränare', 'spelare', 'ej svarat',
+    'nej tack', 'skjuts', 'bil', 'bilar', 'platser', 'lediga', 'ja tack', 'platser kvar',
+    'platser lediga', 'förare', 'plats kvar', 'kör ej', 'kör', 'vill ha skjuts'
+  ];
+  if (blockedExact.includes(lower)) {
+    return false;
+  }
+
+  // 3. Regular Expression patterns for status/driving/tickets etc. (e.g. "4 platser", "2 bilar")
+  if (/\b\d+\s*(platser|plats|lediga|bilar|bil|skolkort|st|stycken)\b/i.test(lower)) {
+    return false;
+  }
+
+  if (lower.startsWith('kommentar:') || lower.startsWith('svar saknas')) {
+    return false;
+  }
+  if (lower.includes('platser') && (lower.includes('kvar') || lower.includes('lediga'))) {
+    return false;
+  }
+
+  // 4. Length check: Too short to be a name
+  if (trimmed.length < 2) {
+    return false;
+  }
+
+  return true;
+}
+
 function ParticipantManager({ 
   session, 
   squad, 
@@ -1512,8 +1560,7 @@ function ParticipantManager({
         return trimmed;
       })
       .filter(name => {
-        const lower = name.toLowerCase();
-        return name.length > 0 && lower !== 'deltar' && lower !== 'deltar:';
+        return name.length > 0 && isValidPlayerName(name);
       });
 
     const newAttendance = [...attendance];
@@ -1663,12 +1710,12 @@ function ParticipantManager({
                     onClick={() => handleTogglePlayer(player.id)}
                     className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
                       isPresent 
-                        ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm' 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 shadow-sm' 
                         : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
                     }`}
                   >
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                      isPresent ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
+                      isPresent ? 'bg-emerald-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
                     }`}>
                       {player.photoUrl ? (
                         <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
@@ -1677,7 +1724,7 @@ function ParticipantManager({
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-indigo-900 dark:text-indigo-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                      <p className={`text-xs font-black truncate uppercase ${isPresent ? 'text-emerald-950 dark:text-emerald-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
                         {player.name}
                       </p>
                       {player.number && (

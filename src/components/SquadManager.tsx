@@ -351,7 +351,7 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
   };
 
   return (
-    <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32 min-w-0">
       <div className="flex items-center justify-end gap-2 mb-8">
         <button
           onClick={() => {
@@ -385,7 +385,7 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
       </div>
 
       {squad.length > 0 && (
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm">
+        <div className="w-full min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm overflow-hidden">
           <div className="flex items-center gap-2 text-zinc-550 dark:text-zinc-450">
             <ArrowUpDown size={16} className="text-zinc-400 shrink-0" />
             <span className="text-[11px] font-black uppercase tracking-widest shrink-0">Sortera efter</span>
@@ -504,7 +504,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             onSubmit={handleAdd}
-            className="bg-white dark:bg-zinc-900 p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-800 shadow-2xl mb-12"
+            className="w-full bg-white dark:bg-zinc-900 p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-zinc-100 dark:border-zinc-800 shadow-2xl mb-12"
           >
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">
@@ -648,7 +648,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
               Inga spelare inlagda i truppen än.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <AnimatePresence mode="popLayout">
                 {sortedPlayers.map((player) => (
                   <motion.div
@@ -657,7 +657,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
+                    className="w-full bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
                       <div className="relative shrink-0">
@@ -726,7 +726,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
               Inga ledare inlagda än. Skapa en medlem och välj "Ledare" som roll.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <AnimatePresence mode="popLayout">
                 {sortedLeaders.map((player) => (
                   <motion.div
@@ -735,7 +735,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
+                    className="w-full bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
                       <div className="relative shrink-0">
@@ -800,7 +800,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-[32px] p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              className="bg-white dark:bg-zinc-900 rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-8">
@@ -845,6 +845,7 @@ Kalle Karlsson	Mittback	4	https://image.url"
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
                     {newRole === 'leader' ? 'Ladda upp ledarbild' : 'Ladda upp spelarbild'}
                   </span>
+                </div>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Typ av medlem</label>
@@ -932,7 +933,6 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     Avbryt
                   </button>
                 </div>
-              </div>
             </motion.div>
           </motion.div>
         )}

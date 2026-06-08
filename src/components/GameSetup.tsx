@@ -1051,7 +1051,7 @@ export default function GameSetup({
                     </div>
                     <div>
                       <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
-                        {sessionAttendance ? 'Använd närvaro från träningspasset' : 'Fördela närvarande spelare'}
+                        Skapa lag automatiskt
                       </span>
                       <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
                         {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
@@ -1126,7 +1126,7 @@ export default function GameSetup({
                         <Copy size={20} />
                       </div>
                       <div className="flex flex-col text-left">
-                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Koppla/Kopiera lagindelning</span>
+                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Kopiera från tidigare lagindelning</span>
                         <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">HÄMTA FRÅN ETT ANNAT MOMENT</span>
                       </div>
                     </div>

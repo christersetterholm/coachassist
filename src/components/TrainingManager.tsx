@@ -202,12 +202,12 @@ function SessionItem({
       key={session.id}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`group bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-150 dark:border-zinc-805 shadow-sm hover:shadow-md transition-all overflow-hidden relative z-0 ${catConfig.borderClass}`}
+      className={`group bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-150 dark:border-zinc-500 shadow-sm hover:shadow-md transition-all overflow-hidden relative z-0 ${catConfig.borderClass}`}
     >
       {/* Main card interface */}
       <div 
         onClick={() => setIsExpanded(prev => !prev)}
-        className="p-4 cursor-pointer select-none active:bg-zinc-50/50 dark:active:bg-zinc-850/30 transition-colors"
+        className="p-4 cursor-pointer select-none active:bg-zinc-50/50 dark:active:bg-zinc-800/30 transition-colors"
       >
         {/* Title & Chevron Row */}
         <div className="flex items-start justify-between gap-4 mb-3">
@@ -397,7 +397,7 @@ function SessionItem({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="bg-zinc-50/60 dark:bg-zinc-950/25 border-t border-zinc-100 dark:border-zinc-805/70 overflow-hidden"
+            className="bg-zinc-50/60 dark:bg-zinc-950/25 border-t border-zinc-100 dark:border-zinc-800/70 overflow-hidden"
           >
             <div className="p-4 text-xs font-medium space-y-4">
               {/* Action buttons (Öppna Planering) */}
@@ -421,10 +421,10 @@ function SessionItem({
                   e.stopPropagation();
                   onSelectSession(session.id, 'attendance');
                 }}
-                className="bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-850 border border-zinc-150 dark:border-zinc-805 shadow-sm p-3.5 rounded-xl cursor-pointer transition-all active:scale-[0.99] group/attendance"
+                className="bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-zinc-150 dark:border-zinc-800 shadow-sm p-3.5 rounded-xl cursor-pointer transition-all active:scale-[0.99] group/attendance"
               >
                 <div className="flex items-center justify-between mb-1.5">
-                  <p className="font-black text-[9px] text-zinc-404 group-hover/attendance:text-indigo-650 dark:group-hover/attendance:text-indigo-400 uppercase tracking-widest transition-colors">Anmälda spelare</p>
+                  <p className="font-black text-[9px] text-zinc-400 group-hover/attendance:text-indigo-650 dark:group-hover/attendance:text-indigo-400 uppercase tracking-widest transition-colors">Anmälda spelare</p>
                   <span className="text-[10px] text-indigo-654 dark:text-indigo-400 font-extrabold flex items-center gap-0.5 opacity-0 group-hover/attendance:opacity-100 transition-opacity">
                     Öppna deltagarlistan <ArrowRight size={10} />
                   </span>
@@ -438,7 +438,7 @@ function SessionItem({
                           {registeredPlayersCount} av {totalPlayersSquad}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-zinc-404 dark:text-zinc-505 text-[11px]">
+                      <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-500 text-[11px]">
                         <span>Ledarnärvaro:</span>
                         <span>
                           {registeredLeadersCount} av {totalLeadersSquad}
@@ -469,7 +469,7 @@ function SessionItem({
                     <FileText size={11} className="text-amber-500" />
                     <span>Syfte & Anteckningar</span>
                   </div>
-                  <p className="text-zinc-805 dark:text-zinc-200 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
+                  <p className="text-zinc-800 dark:text-zinc-200 leading-relaxed font-bold break-words whitespace-pre-wrap select-text">
                     {renderTextWithLinks(session.notes || '')}
                   </p>
                 </div>
@@ -478,7 +478,7 @@ function SessionItem({
               {/* Information / Beskrivning (Practical synced calendar description) */}
               {session.description ? (
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-3.5 rounded-xl shadow-sm mt-1">
-                  <div className="flex items-center gap-1.5 font-black text-[9px] text-zinc-404 uppercase tracking-widest mb-2 border-b border-zinc-50 dark:border-zinc-805 pb-1.5">
+                  <div className="flex items-center gap-1.5 font-black text-[9px] text-zinc-400 uppercase tracking-widest mb-2 border-b border-zinc-50 dark:border-zinc-800 pb-1.5">
                     <FileText size={11} className="text-zinc-400" />
                     <span>Information / Beskrivning (från kalender)</span>
                   </div>
@@ -864,7 +864,7 @@ export default function TrainingManager({
   const currentExerciseForTeams = exercises.find(e => e.id === selectedExerciseForTeams);
 
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto mb-32 pt-4">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto mb-32 pt-0 sm:pt-4">
       {/* Team Overview Modal */}
       <AnimatePresence>
         {selectedExerciseForTeams && currentExerciseForTeams && (
@@ -926,52 +926,52 @@ export default function TrainingManager({
           />
         )}
       </AnimatePresence>
-
+ 
       {/* Tab Switcher */}
-      <div className="flex p-1 bg-zinc-100 dark:bg-zinc-900 rounded-2xl mb-4 sm:mb-8 mx-4 sm:mx-0 overflow-x-auto scrollbar-none whitespace-nowrap">
+      <div className="flex p-0.5 bg-zinc-150/70 dark:bg-zinc-900 rounded-none sm:rounded-xl mb-3.5 sm:mb-6 mx-0 sm:mx-0 overflow-x-auto scrollbar-none whitespace-nowrap border-b border-t-0 border-x-0 sm:border border-zinc-200/50 dark:border-zinc-800/70">
         <button
           onClick={() => onTabChange('calendar_view')}
-          className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1.5 rounded-xl text-[10px] sm:text-sm font-bold transition-all shrink-0 ${
+          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
             activeTab === 'calendar_view'
-              ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
+              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
           }`}
         >
-          <CalendarDays size={16} className="hidden sm:block" />
-          <span>Kalender</span>
+          <CalendarDays size={13} className="hidden sm:block" />
+          <span>Aktiviteter</span>
         </button>
         <button
           onClick={() => onTabChange('planned')}
-          className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1.5 rounded-xl text-[10px] sm:text-sm font-bold transition-all shrink-0 ${
+          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
             activeTab === 'planned'
-              ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-350'
+              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
+              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
           }`}
         >
-          <Calendar size={16} className="hidden sm:block" />
-          <span>Planering</span>
+          <Calendar size={13} className="hidden sm:block" />
+          <span>Planeringar</span>
         </button>
         <button
           onClick={() => onTabChange('completed')}
-          className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1.5 rounded-xl text-[10px] sm:text-sm font-bold transition-all shrink-0 ${
+          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
             activeTab === 'completed'
-              ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
+              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
           }`}
         >
-          <History size={16} className="hidden sm:block" />
+          <History size={13} className="hidden sm:block" />
           <span>Genomförda</span>
         </button>
         <button
           onClick={() => onTabChange('exercises')}
-          className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 sm:py-3 px-1.5 rounded-xl text-[10px] sm:text-sm font-bold transition-all shrink-0 ${
+          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
             activeTab === 'exercises'
-              ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
+              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
           }`}
         >
-          <Trophy size={16} className="hidden sm:block" />
-          <span>Tävling</span>
+          <Trophy size={13} className="hidden sm:block" />
+          <span>Tävlingar</span>
         </button>
       </div>
 
@@ -1088,7 +1088,7 @@ export default function TrainingManager({
                   className={`flex items-center justify-center gap-2 border px-3 sm:px-4 py-2 rounded-xl font-bold transition-all text-sm shadow-sm cursor-pointer ${
                     showIgnoredInCompleted
                       ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/50 text-indigo-650 dark:text-indigo-400 font-extrabold"
-                      : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-805/50"
+                      : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                   }`}
                   title={showIgnoredInCompleted ? "Visa vanliga genomförda pass" : "Visa dolda/ignorerade pass"}
                 >
@@ -1443,7 +1443,7 @@ export default function TrainingManager({
               </div>
 
               <div className="space-y-4">
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed bg-zinc-50 dark:bg-zinc-950/45 p-3.5 rounded-2xl border border-zinc-100 dark:border-zinc-855">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed bg-zinc-50 dark:bg-zinc-950/45 p-3.5 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                   Här sparas alla raderade träningspass. Du kan återställa dem till planeringen eller de genomförda aktiviteterna med ett enda klick.
                 </p>
 
@@ -1615,7 +1615,7 @@ export default function TrainingManager({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-zinc-50 dark:border-zinc-805 dark:border-zinc-800">
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-zinc-50 dark:border-zinc-800">
                 <div>
                   <h3 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">Planera en serie träningspass</h3>
                   <p className="text-xs text-zinc-400 font-bold mt-0.5">Skapa flera träningar på en och samma gång</p>
@@ -1751,7 +1751,7 @@ export default function TrainingManager({
                   </div>
 
                   {/* Selected count and list */}
-                  <div className="flex-1 flex flex-col mt-4 min-h-[160px] max-h-[180px] border border-zinc-105 border-zinc-100 dark:border-zinc-800 rounded-2xl bg-zinc-50/50 dark:bg-zinc-900/40 p-3 overflow-hidden">
+                  <div className="flex-1 flex flex-col mt-4 min-h-[160px] max-h-[180px] border border-zinc-100 dark:border-zinc-800 rounded-2xl bg-zinc-50/50 dark:bg-zinc-900/40 p-3 overflow-hidden">
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest font-bold">
                         Valda datum ({selectedDates.length})
