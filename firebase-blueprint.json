@@ -62,6 +62,7 @@
         },
         "exercises": { "type": "array" },
         "sessions": { "type": "array" },
+        "deletedSessions": { "type": "array" },
         "lineups": { "type": "array" },
         "activeLineupId": { "type": "string" },
         "periods": { "type": "array" },
@@ -80,6 +81,8 @@
             "icsUrl": { "type": "string" }
           }
         },
+        "exerciseBank": { "type": "array" },
+        "exerciseBankCategories": { "type": "array" },
         "updatedAt": { "type": "number" }
       }
     },

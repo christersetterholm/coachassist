@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Calendar, Plus, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, Settings, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit } from 'lucide-react';
+import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Exercise, TrainingSession, TrainingSettings } from '../types';
+import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
 import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
+import ExerciseBankView from './ExerciseBankView';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -28,11 +29,20 @@ interface TrainingManagerProps {
   onUpdateSession: (updated: TrainingSession) => void;
   onMovePlayer: (exerciseId: string, playerId: string, targetTeamId: string) => void;
   onCopyTeams?: (sourceId: string, targetId: string) => void;
-  activeTab: 'planned' | 'completed' | 'exercises' | 'calendar_view';
-  onTabChange: (tab: 'planned' | 'completed' | 'exercises' | 'calendar_view') => void;
+  activeTab: 'completed' | 'exercises' | 'calendar_view' | 'bank';
+  onTabChange: (tab: 'completed' | 'exercises' | 'calendar_view' | 'bank') => void;
   settings?: TrainingSettings;
   onUpdateSettings?: (settings: TrainingSettings) => void;
+  openSettings?: boolean;
+  onCloseSettings?: () => void;
   isCloudDataLoaded?: boolean;
+  exerciseBank?: BankExercise[];
+  exerciseBankCategories?: string[];
+  onAddBankCategory?: (category: string) => void;
+  onRemoveBankCategory?: (category: string) => void;
+  onAddBankExercise?: (exercise: Omit<BankExercise, "id" | "createdAt">) => void;
+  onUpdateBankExercise?: (id: string, updates: Partial<BankExercise>) => void;
+  onRemoveBankExercise?: (id: string) => void;
 }
 
 const isSessionPassed = (session: TrainingSession) => {
@@ -521,13 +531,32 @@ export default function TrainingManager({
   onTabChange,
   settings,
   onUpdateSettings,
-  isCloudDataLoaded = true
+  openSettings,
+  onCloseSettings,
+  isCloudDataLoaded = true,
+  exerciseBank = [],
+  exerciseBankCategories = [],
+  onAddBankCategory,
+  onRemoveBankCategory,
+  onAddBankExercise,
+  onUpdateBankExercise,
+  onRemoveBankExercise
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
   const [showClearTrashConfirm, setShowClearTrashConfirm] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  
+  const [localShowSettings, setLocalShowSettings] = useState(false);
+  const showSettings = openSettings !== undefined ? openSettings : localShowSettings;
+  const setShowSettings = (val: boolean) => {
+    if (openSettings !== undefined) {
+      if (!val && onCloseSettings) onCloseSettings();
+    } else {
+      setLocalShowSettings(val);
+    }
+  };
+
   const [showTrashModal, setShowTrashModal] = useState(false);
 
   // Series creation states
@@ -540,7 +569,6 @@ export default function TrainingManager({
   const [manualDateInput, setManualDateInput] = useState('');
 
   // Sorting states
-  const [plannedSortAsc, setPlannedSortAsc] = useState(true); // Default to true (nearest/earliest first)
   const [completedSortAsc, setCompletedSortAsc] = useState(false); // Default to false (newest/latest first)
   const [showIgnoredInCompleted, setShowIgnoredInCompleted] = useState(false);
 
@@ -636,14 +664,45 @@ export default function TrainingManager({
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [hasAutoSynced, setHasAutoSynced] = useState(false);
 
+  const [showConfirmClearPast, setShowConfirmClearPast] = useState(false);
+  const [showConfirmClearFuture, setShowConfirmClearFuture] = useState(false);
+
+  const pastSessionsWithNotes = sessions.filter(s => isSessionPassed(s) && s.notes && s.notes.trim() !== '');
+  const futureSessionsWithNotes = sessions.filter(s => !isSessionPassed(s) && s.notes && s.notes.trim() !== '');
+
+  const handleClearNotes = (target: 'past' | 'future') => {
+    const targetSessions = sessions.filter(s => {
+      const isPast = isSessionPassed(s);
+      const isMatched = target === 'past' ? isPast : !isPast;
+      return isMatched && s.notes && s.notes.trim() !== '';
+    });
+
+    targetSessions.forEach(s => {
+      onUpdateSession({
+        ...s,
+        notes: '',
+        updatedAt: Date.now()
+      });
+    });
+
+    if (target === 'past') {
+      setShowConfirmClearPast(false);
+    } else {
+      setShowConfirmClearFuture(false);
+    }
+  };
+
   // Synchronize local setting states with outer props when they update (e.g., from cloud Firestore sync)
+  const prevShowSettingsRef = React.useRef(showSettings);
   React.useEffect(() => {
-    if (!showSettings && settings) {
+    const wasClosed = !prevShowSettingsRef.current;
+    if ((!showSettings || (showSettings && wasClosed)) && settings) {
       setLocalStartTime(settings.defaultStartTime || '18:00');
       setLocalDuration(settings.defaultDuration || 90);
-      setLocalEndTime(settings.defaultEndTime || '19:30');
+      setLocalEndTime(settings.defaultEndTime || calculateEndTime(settings.defaultStartTime || '18:00', settings.defaultDuration || 90));
       setLocalIcsUrl(settings.icsUrl || '');
     }
+    prevShowSettingsRef.current = showSettings;
   }, [settings, showSettings]);
 
   const handleSyncCalendar = async (customUrl?: string, isSilent = false) => {
@@ -826,41 +885,22 @@ export default function TrainingManager({
   };
 
   const sortSessionsByDate = () => {
-    if (activeTab === 'planned') {
-      const nextAsc = !plannedSortAsc;
-      setPlannedSortAsc(nextAsc);
-      
-      const planned = sessions.filter(s => !isSessionCompletedOrPassed(s));
-      const completed = sessions.filter(s => isSessionCompletedOrPassed(s));
-      
-      const sortedPlanned = [...planned].sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateA !== dateB) {
-          return nextAsc ? dateA - dateB : dateB - dateA;
-        }
-        return nextAsc ? a.startTime.localeCompare(b.startTime) : b.startTime.localeCompare(a.startTime);
-      });
-      
-      onReorderSessions([...sortedPlanned, ...completed]);
-    } else if (activeTab === 'completed') {
-      const nextAsc = !completedSortAsc;
-      setCompletedSortAsc(nextAsc);
-      
-      const planned = sessions.filter(s => !isSessionCompletedOrPassed(s));
-      const completed = sessions.filter(s => isSessionCompletedOrPassed(s));
-      
-      const sortedCompleted = [...completed].sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateA !== dateB) {
-          return nextAsc ? dateA - dateB : dateB - dateA;
-        }
-        return nextAsc ? a.startTime.localeCompare(b.startTime) : b.startTime.localeCompare(a.startTime);
-      });
-      
-      onReorderSessions([...planned, ...sortedCompleted]);
-    }
+    const nextAsc = !completedSortAsc;
+    setCompletedSortAsc(nextAsc);
+    
+    const planned = sessions.filter(s => !isSessionCompletedOrPassed(s));
+    const completed = sessions.filter(s => isSessionCompletedOrPassed(s));
+    
+    const sortedCompleted = [...completed].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateA !== dateB) {
+        return nextAsc ? dateA - dateB : dateB - dateA;
+      }
+      return nextAsc ? a.startTime.localeCompare(b.startTime) : b.startTime.localeCompare(a.startTime);
+    });
+    
+    onReorderSessions([...planned, ...sortedCompleted]);
   };
 
   const currentExerciseForTeams = exercises.find(e => e.id === selectedExerciseForTeams);
@@ -943,17 +983,6 @@ export default function TrainingManager({
           <span>Aktiviteter</span>
         </button>
         <button
-          onClick={() => onTabChange('planned')}
-          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'planned'
-              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
-          }`}
-        >
-          <Calendar size={13} className="hidden sm:block" />
-          <span>Planeringar</span>
-        </button>
-        <button
           onClick={() => onTabChange('completed')}
           className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
             activeTab === 'completed'
@@ -975,6 +1004,17 @@ export default function TrainingManager({
           <Trophy size={13} className="hidden sm:block" />
           <span>Tävlingar</span>
         </button>
+        <button
+          onClick={() => onTabChange('bank')}
+          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
+            activeTab === 'bank'
+              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
+              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
+          }`}
+        >
+          <Library size={13} className="hidden sm:block" />
+          <span>Övningsbank</span>
+        </button>
       </div>
 
       {activeTab === 'exercises' ? (
@@ -989,23 +1029,33 @@ export default function TrainingManager({
           onNewExercise={onNewExercise}
           onShowTeams={(id) => setSelectedExerciseForTeams(id)}
         />
+      ) : activeTab === 'bank' ? (
+        <ExerciseBankView
+          exerciseBank={exerciseBank}
+          exerciseBankCategories={exerciseBankCategories}
+          onAddBankCategory={onAddBankCategory}
+          onRemoveBankCategory={onRemoveBankCategory}
+          onAddBankExercise={onAddBankExercise}
+          onUpdateBankExercise={onUpdateBankExercise}
+          onRemoveBankExercise={onRemoveBankExercise}
+          sessions={sessions}
+          onUpdateSession={onUpdateSession}
+        />
       ) : activeTab === 'calendar_view' ? (
         <MobileCalendarView
           sessions={sessions}
+          deletedSessionsCount={deletedSessions?.length || 0}
           squad={squad}
           onSelectSession={onSelectSession}
+          onDeleteSession={onDeleteSession}
           isSyncing={isSyncing}
           onSync={async () => {
             await handleSyncCalendar(undefined, false);
           }}
           hasSyncUrl={!!settings?.icsUrl}
-          onOpenSettings={() => {
-            setLocalStartTime(settings?.defaultStartTime || '18:00');
-            setLocalDuration(settings?.defaultDuration || 90);
-            setLocalEndTime(settings?.defaultEndTime || calculateEndTime(settings?.defaultStartTime || '18:00', settings?.defaultDuration || 90));
-            setLocalIcsUrl(settings?.icsUrl || '');
-            setShowSettings(true);
-          }}
+          onNewSession={onNewSession}
+          onOpenTrash={() => setShowTrashModal(true)}
+          onOpenSeriesCreator={() => setShowSeriesModal(true)}
         />
       ) : (
         <div className="px-4 sm:px-0">
@@ -1014,40 +1064,21 @@ export default function TrainingManager({
               <button
                 onClick={sortSessionsByDate}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm cursor-pointer"
-                title={
-                  activeTab === 'planned'
-                    ? (plannedSortAsc ? "Sorterat: Närmast först. Klicka för att visa längst fram i tiden först." : "Sorterat: Längst fram i tiden först. Klicka för att visa närmast först.")
-                    : (completedSortAsc ? "Sorterat: Äldsta först. Klicka för att visa senaste först." : "Sorterat: Senaste först. Klicka för att visa äldsta först.")
-                }
+                title={completedSortAsc ? "Sorterat: Äldsta först. Klicka för att visa senaste först." : "Sorterat: Senaste först. Klicka för att visa äldsta först."}
               >
                 <ArrowUpDown size={14} className="text-zinc-400" />
                 <span className="hidden sm:inline">
-                  {activeTab === 'planned'
-                    ? (plannedSortAsc ? "Närmast först" : "Längst fram")
-                    : (completedSortAsc ? "Äldsta först" : "Senaste först")}
+                  {completedSortAsc ? "Äldsta först" : "Senaste först"}
                 </span>
               </button>
               <button
-                onClick={() => {
-                  setLocalStartTime(settings?.defaultStartTime || '18:00');
-                  setLocalDuration(settings?.defaultDuration || 90);
-                  setLocalEndTime(settings?.defaultEndTime || calculateEndTime(settings?.defaultStartTime || '18:00', settings?.defaultDuration || 90));
-                  setLocalIcsUrl(settings?.icsUrl || '');
-                  setShowSettings(true);
-                }}
-                className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm cursor-pointer"
-                title="Inställningar för träning"
-              >
-                <Settings size={20} />
-              </button>
-              <button
                 onClick={() => setShowTrashModal(true)}
-                className={`p-2 transition-all bg-white dark:bg-zinc-900 border rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer ${
+                className={`p-2 transition-all bg-white dark:bg-zinc-905 border rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer ${
                   deletedSessions && deletedSessions.length > 0
                     ? "border-rose-200 dark:border-rose-900/40 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                    : "border-zinc-100 dark:border-zinc-800 text-zinc-400 hover:text-zinc-650"
+                    : "border-zinc-150 dark:border-zinc-800 text-zinc-450 hover:text-zinc-650"
                 }`}
-                title="Papperskorg - återställ raderade träningspass"
+                title="Papperskorg"
               >
                 <Trash2 size={20} />
                 {deletedSessions && deletedSessions.length > 0 && (
@@ -1057,47 +1088,17 @@ export default function TrainingManager({
                 )}
               </button>
               <button
-                onClick={onNewSession}
-                className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-3 sm:px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
+                onClick={() => setShowIgnoredInCompleted(prev => !prev)}
+                className={`flex items-center justify-center gap-2 border px-3 sm:px-4 py-2 rounded-xl font-bold transition-all text-sm shadow-sm cursor-pointer ${
+                  showIgnoredInCompleted
+                    ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/50 text-indigo-650 dark:text-indigo-400 font-extrabold"
+                    : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                }`}
+                title={showIgnoredInCompleted ? "Visa vanliga genomförda pass" : "Visa dolda/ignorerade pass"}
               >
-                <Plus size={18} />
-                <span className="hidden sm:inline">Planera</span>
+                {showIgnoredInCompleted ? <Eye size={16} className="text-indigo-500" /> : <EyeOff size={16} className="text-zinc-400" />}
+                <span className="hidden sm:inline">{showIgnoredInCompleted ? "Visar ignorerade" : "Visa ignorerade"}</span>
               </button>
-              {activeTab === 'planned' && (
-                <button
-                  onClick={() => setShowSeriesModal(true)}
-                  className="flex items-center justify-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 px-3 sm:px-4 py-2 rounded-xl font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all text-sm shadow-sm"
-                  title="Planera en serie träningspass"
-                >
-                  <Calendar size={18} className="text-zinc-500" />
-                  <span className="hidden sm:inline">Skapa serie</span>
-                </button>
-              )}
-              {activeTab === 'planned' && settings?.icsUrl && (
-                <button
-                  onClick={() => handleSyncCalendar()}
-                  disabled={isSyncing}
-                  className="flex items-center justify-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 px-3 sm:px-4 py-2 rounded-xl font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all text-sm shadow-sm cursor-pointer"
-                  title="Synka träningspass och matcher från laget.se"
-                >
-                  <RefreshCw size={16} className={`text-zinc-500 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span className="hidden sm:inline">{isSyncing ? "Synkar..." : "Synka laget.se"}</span>
-                </button>
-              )}
-              {activeTab === 'completed' && (
-                <button
-                  onClick={() => setShowIgnoredInCompleted(prev => !prev)}
-                  className={`flex items-center justify-center gap-2 border px-3 sm:px-4 py-2 rounded-xl font-bold transition-all text-sm shadow-sm cursor-pointer ${
-                    showIgnoredInCompleted
-                      ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/50 text-indigo-650 dark:text-indigo-400 font-extrabold"
-                      : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                  }`}
-                  title={showIgnoredInCompleted ? "Visa vanliga genomförda pass" : "Visa dolda/ignorerade pass"}
-                >
-                  {showIgnoredInCompleted ? <Eye size={16} className="text-indigo-500" /> : <EyeOff size={16} className="text-zinc-400" />}
-                  <span className="hidden sm:inline">{showIgnoredInCompleted ? "Visar ignorerade" : "Visa ignorerade"}</span>
-                </button>
-              )}
             </div>
           </div>
 
@@ -1142,11 +1143,11 @@ export default function TrainingManager({
           )}
 
           {(() => {
-            const showIgnoredOnly = activeTab === 'completed' && showIgnoredInCompleted;
+            const showIgnoredOnly = showIgnoredInCompleted;
             const filteredSessionsList = [...sessions].filter(s => 
               showIgnoredOnly 
                 ? s.isIgnored 
-                : (!s.isIgnored && (activeTab === 'completed' ? isSessionCompletedOrPassed(s) : !isSessionCompletedOrPassed(s)))
+                : (!s.isIgnored && isSessionCompletedOrPassed(s))
             );
 
             if (filteredSessionsList.length === 0) {
@@ -1158,32 +1159,13 @@ export default function TrainingManager({
                   <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
                     {showIgnoredOnly 
                       ? 'Inga ignorerade träningspass' 
-                      : `Inga ${activeTab === 'completed' ? 'genomförda' : 'planerade'} träningspass`}
+                      : 'Inga genomförda träningspass'}
                   </h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8">
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
                     {showIgnoredOnly
                       ? 'Träningspass du döljer eller väljer att ignorera hamnar här.'
-                      : (activeTab === 'completed' 
-                          ? 'När du markerar ett träningspass som genomfört hamnar det här.'
-                          : 'Börja planera din nästa träning genom att lägga till tävlingsmoment och tider.')}
+                      : 'När du genomfört eller passerat ett träningspass hamnar det automatiskt här.'}
                   </p>
-                  {activeTab === 'planned' && (
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                      <button
-                         onClick={onNewSession}
-                         className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all"
-                       >
-                         Planera ditt första träningspass
-                       </button>
-                       <button
-                         onClick={() => setShowSeriesModal(true)}
-                         className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 px-8 py-3 rounded-2xl font-bold hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2"
-                       >
-                         <Calendar size={18} />
-                         <span>Skapa serie</span>
-                       </button>
-                    </div>
-                  )}
                 </div>
               );
             }
@@ -1286,17 +1268,17 @@ export default function TrainingManager({
                 </div>
 
                 <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60">
-                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Laget.se Integration</h4>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Laget.se webcal/ICS-länk</label>
+                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration</h4>
+                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Webcal / ICS-länk</label>
                   <input
                     type="text"
                     value={localIcsUrl}
                     onChange={(e) => setLocalIcsUrl(e.target.value)}
-                    placeholder="webcal://cal.laget.se/..."
+                    placeholder="webcal://..."
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-xs sm:text-sm font-semibold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                   <p className="text-[10px] text-zinc-400 mt-1.5 leading-relaxed">
-                    Klistra in lagets prenumerationslänk (webcal/ics) från laget.se. Träningspass och matcher synkas då automatiskt.
+                    Klistra in lagets prenumerationslänk (webcal/ics-länk) från en extern tjänst som till exempel <strong className="font-bold text-zinc-500 dark:text-zinc-350">Laget.se</strong>, <strong className="font-bold text-zinc-500 dark:text-zinc-350">SportAdmin</strong> eller <strong className="font-bold text-zinc-500 dark:text-zinc-350">Svenskalag.se</strong>. Träningspass och matcher synkas då automatiskt.
                   </p>
                   
                   {localIcsUrl && (
@@ -1328,6 +1310,95 @@ export default function TrainingManager({
                       <span>{isSyncing ? "Synkar..." : "Synka kalender nu"}</span>
                     </button>
                   )}
+                </div>
+
+                <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60 space-y-3">
+                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">Rensa Syfte & Anteckningar</h4>
+                  <p className="text-[10px] text-zinc-400 leading-relaxed">
+                    Om pass har fått felaktig information synkad från kalendern kan du rensa fältet <strong className="font-bold text-zinc-500 dark:text-zinc-350">Syfte & Anteckningar</strong> för alla pass.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {/* Clear Past Notes */}
+                    <div className="flex flex-col gap-1.5">
+                      {showConfirmClearPast ? (
+                        <div className="flex flex-col gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleClearNotes('past')}
+                            className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <span>Ja, rensa ({pastSessionsWithNotes.length})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmClearPast(false)}
+                            className="w-full py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-300 rounded-lg text-[9px] font-extrabold uppercase tracking-tight transition-all cursor-pointer"
+                          >
+                            <span>Avbryt</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (pastSessionsWithNotes.length > 0) {
+                              setShowConfirmClearPast(true);
+                              setShowConfirmClearFuture(false);
+                            }
+                          }}
+                          disabled={pastSessionsWithNotes.length === 0}
+                          className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all border flex items-center justify-center gap-1.5 cursor-pointer ${
+                            pastSessionsWithNotes.length > 0
+                              ? 'bg-red-50 text-red-650 border-red-100 hover:bg-red-100 dark:bg-red-950/25 dark:text-red-400 dark:border-red-900/30'
+                              : 'bg-zinc-50 text-zinc-400 border-zinc-200 dark:bg-zinc-800/20 dark:text-zinc-600 dark:border-zinc-805/30 opacity-60 cursor-not-allowed'
+                          }`}
+                        >
+                          Tidigare pass ({pastSessionsWithNotes.length})
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Clear Future Notes */}
+                    <div className="flex flex-col gap-1.5">
+                      {showConfirmClearFuture ? (
+                        <div className="flex flex-col gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleClearNotes('future')}
+                            className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <span>Ja, rensa ({futureSessionsWithNotes.length})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmClearFuture(false)}
+                            className="w-full py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-300 rounded-lg text-[9px] font-extrabold uppercase tracking-tight transition-all cursor-pointer"
+                          >
+                            <span>Avbryt</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (futureSessionsWithNotes.length > 0) {
+                              setShowConfirmClearFuture(true);
+                              setShowConfirmClearPast(false);
+                            }
+                          }}
+                          disabled={futureSessionsWithNotes.length === 0}
+                          className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all border flex items-center justify-center gap-1.5 cursor-pointer ${
+                            futureSessionsWithNotes.length > 0
+                              ? 'bg-red-50 text-red-650 border-red-100 hover:bg-red-100 dark:bg-red-950/25 dark:text-red-400 dark:border-red-900/30'
+                              : 'bg-zinc-50 text-zinc-400 border-zinc-200 dark:bg-zinc-800/20 dark:text-zinc-600 dark:border-zinc-805/30 opacity-60 cursor-not-allowed'
+                          }`}
+                        >
+                          Framtida pass ({futureSessionsWithNotes.length})
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {sessions.filter(s => s.isIgnored).length > 0 && (
@@ -1564,7 +1635,7 @@ export default function TrainingManager({
                 </h3>
                 <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm font-medium leading-relaxed">
                   {sessionToDeleteData?.externalId 
-                    ? `"${sessionToDeleteData?.title}" har synkroniserats från laget.se. Välj "Ignorera & dölj" om du inte vill att det ska importeras på nytt vid nästa synk.`
+                    ? `"${sessionToDeleteData?.title}" har synkroniserats från en extern kalender. Välj "Ignorera & dölj" om du inte vill att det ska importeras på nytt vid nästa synk.`
                     : `Är du säker på att du vill radera "${sessionToDeleteData?.title}"? Detta tar bort planeringen permanent.`}
                 </p>
                 <div className="flex flex-col gap-2.5">
@@ -1711,14 +1782,14 @@ export default function TrainingManager({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left overflow-y-auto"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-start sm:items-center justify-center p-4 text-left overflow-y-auto"
             onClick={() => setShowSeriesModal(false)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-8 overflow-hidden flex flex-col"
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-4 sm:my-8 overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}

@@ -1,7 +1,27 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Copy, Download, Upload, Check, Calendar, ListChecks, Info, Search, AlertCircle, FileText, ChevronRight } from 'lucide-react';
+import { X, Copy, Download, Upload, Check, Calendar, ListChecks, Info, Search, AlertCircle, FileText, ChevronRight, ExternalLink } from 'lucide-react';
 import { TrainingSession, SessionMoment } from '../types';
+
+const DEFAULT_CATEGORIES = [
+  'Uppvärmning',
+  'Aktivering',
+  'Teknik',
+  'Spel',
+  'Anfallsspel',
+  'Speluppbyggnad',
+  'Kontring',
+  'Avslut',
+  'Försvarsspel',
+  'Förhindra speluppbyggnad',
+  'Återerövring',
+  'Förhindra avslut',
+  'Fotbollsfys',
+  'Explosiv träning',
+  'Fotbollsstyrka',
+  'Målvakt',
+  'Annat'
+];
 
 interface MomentCopyModalProps {
   isOpen: boolean;
@@ -9,6 +29,8 @@ interface MomentCopyModalProps {
   currentSession: TrainingSession;
   allSessions: TrainingSession[];
   onUpdateSession: (updated: TrainingSession) => void;
+  exerciseBank?: any[];
+  exerciseBankCategories?: string[];
 }
 
 export default function MomentCopyModal({
@@ -17,11 +39,19 @@ export default function MomentCopyModal({
   currentSession,
   allSessions,
   onUpdateSession,
+  exerciseBank = [],
+  exerciseBankCategories = [],
 }: MomentCopyModalProps) {
   const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
   
   // Mobile step state for responsiveness
   const [mobileStep, setMobileStep] = useState<1 | 2>(1);
+  
+  // Import Source Selector: 'sessions' vs 'bank'
+  const [importSource, setImportSource] = useState<'sessions' | 'bank'>('sessions');
+  const [importSelectedBankIds, setImportSelectedBankIds] = useState<Set<string>>(new Set());
+  const [previewBankExerciseId, setPreviewBankExerciseId] = useState<string>('');
+  const [bankCategoryFilter, setBankCategoryFilter] = useState('Alla');
   
   // Tab 1 (Import) State
   const [selectedSourceSessionId, setSelectedSourceSessionId] = useState<string>('');
@@ -44,11 +74,27 @@ export default function MomentCopyModal({
     });
   };
 
-  // Get other sessions sorted by date (latest first)
+  // Get other sessions sorted so future sessions are first (ascending closest first), then past sessions (descending closest first)
   const otherSessions = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayTimestamp = todayStart.getTime();
+
     return allSessions
       .filter(s => s.id !== currentSession.id)
-      .sort((a, b) => b.date - a.date);
+      .sort((a, b) => {
+        const isFutureA = a.date >= todayTimestamp;
+        const isFutureB = b.date >= todayTimestamp;
+
+        if (isFutureA && !isFutureB) return -1;
+        if (!isFutureA && isFutureB) return 1;
+
+        if (isFutureA && isFutureB) {
+          return a.date - b.date; // Future: closest first (ascending)
+        } else {
+          return b.date - a.date; // Past: most recent first (descending)
+        }
+      });
   }, [allSessions, currentSession.id]);
 
   // Filtered source sessions for Import Tab
@@ -74,6 +120,25 @@ export default function MomentCopyModal({
     );
   }, [otherSessions, exportSearchQuery]);
 
+  // Bank Exercises filtered
+  const filteredBankExercises = useMemo(() => {
+    return (exerciseBank || []).filter(ex => {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = (ex.name || '').toLowerCase().includes(q) || (ex.description || '').toLowerCase().includes(q);
+      
+      const cats = ex.categories && ex.categories.length > 0 
+        ? ex.categories 
+        : (ex.category ? [ex.category] : []);
+      const categoryMatch = bankCategoryFilter === 'Alla' || cats.includes(bankCategoryFilter);
+      
+      return nameMatch && categoryMatch;
+    });
+  }, [exerciseBank, searchQuery, bankCategoryFilter]);
+
+  const previewExercise = useMemo(() => {
+    return (exerciseBank || []).find(ex => ex.id === previewBankExerciseId) || filteredBankExercises[0];
+  }, [exerciseBank, previewBankExerciseId, filteredBankExercises]);
+
   // Source Session moments
   const sourceSession = useMemo(() => {
     return otherSessions.find(s => s.id === selectedSourceSessionId);
@@ -83,6 +148,7 @@ export default function MomentCopyModal({
   const handleClose = () => {
     setSelectedSourceSessionId('');
     setImportSelectedMomentIds(new Set());
+    setImportSelectedBankIds(new Set());
     setExportSelectedMomentIds(new Set());
     setExportTargetSessionIds(new Set());
     setSearchQuery('');
@@ -94,20 +160,40 @@ export default function MomentCopyModal({
 
   // Import Action
   const handleImport = () => {
-    if (!sourceSession) return;
-    const selectedMoments = sourceSession.moments.filter(m => importSelectedMomentIds.has(m.id));
-    if (selectedMoments.length === 0) return;
+    let copiedMoments: SessionMoment[] = [];
 
-    // Create copies: Strip competition settings (exerciseId) & assign new unique IDs
-    const copiedMoments: SessionMoment[] = selectedMoments.map(m => ({
-      id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
-      name: m.name,
-      duration: m.duration,
-      description: m.description,
-      imageUrl: m.imageUrl,
-      imageUrls: m.imageUrls ? [...m.imageUrls] : undefined,
-      externalLink: m.externalLink,
-    }));
+    if (importSource === 'bank') {
+      const selectedBankExercises = exerciseBank.filter(ex => importSelectedBankIds.has(ex.id));
+      if (selectedBankExercises.length === 0) return;
+
+      copiedMoments = selectedBankExercises.map(ex => ({
+        id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${ex.id.slice(-4)}`,
+        name: ex.name,
+        duration: ex.duration || 15,
+        description: ex.description,
+        imageUrl: ex.imageUrl,
+        imageUrls: ex.imageUrl ? [ex.imageUrl] : undefined,
+        externalLink: ex.externalLink,
+        bankExerciseId: ex.id,
+      }));
+    } else {
+      if (!sourceSession) return;
+      const selectedMoments = sourceSession.moments.filter(m => importSelectedMomentIds.has(m.id));
+      if (selectedMoments.length === 0) return;
+
+      // Create copies: Strip competition settings (exerciseId) & assign new unique IDs
+      copiedMoments = selectedMoments.map(m => ({
+        id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
+        name: m.name,
+        duration: m.duration,
+        description: m.description,
+        imageUrl: m.imageUrl,
+        imageUrls: m.imageUrls ? [...m.imageUrls] : undefined,
+        externalLink: m.externalLink,
+      }));
+    }
+
+    if (copiedMoments.length === 0) return;
 
     // Update current session
     onUpdateSession({
@@ -119,6 +205,7 @@ export default function MomentCopyModal({
     
     // Clear selections
     setImportSelectedMomentIds(new Set());
+    setImportSelectedBankIds(new Set());
     setMobileStep(1);
   };
 
@@ -213,6 +300,10 @@ export default function MomentCopyModal({
     setExportTargetSessionIds(updated);
   };
 
+  const bankCategoriesList = useMemo(() => {
+    return ['Alla', ...DEFAULT_CATEGORIES, ...exerciseBankCategories];
+  }, [exerciseBankCategories]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -295,14 +386,231 @@ export default function MomentCopyModal({
                   {/* IMPORT TAB */}
               {activeTab === 'import' && (
                 <div className="space-y-6">
-                  {otherSessions.filter(s => s.moments && s.moments.length > 0).length === 0 ? (
-                    <div className="text-center py-12 text-zinc-400">
-                      <AlertCircle className="mx-auto mb-3 text-zinc-350" size={48} />
-                      <p className="font-bold">Hittade inga andra träningspass med planerade övningar</p>
-                      <p className="text-xs mt-2 max-w-sm mx-auto">Det måste finnas andra träningspass som innehåller sparade övningar för att kunna hämta från dem.</p>
+                  {/* Import Source Switcher Segment */}
+                  <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-2xl max-w-md border border-zinc-200/50 dark:border-zinc-700/50">
+                    <button
+                      type="button"
+                      onClick={() => { setImportSource('sessions'); setSuccessMessage(null); }}
+                      className={`flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                        importSource === 'sessions'
+                          ? 'bg-white dark:bg-zinc-750 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                      }`}
+                    >
+                      Från andra träningar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setImportSource('bank'); setSuccessMessage(null); }}
+                      className={`flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                        importSource === 'bank'
+                          ? 'bg-white dark:bg-zinc-750 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                      }`}
+                    >
+                      Från övningsbanken ({exerciseBank.length})
+                    </button>
+                  </div>
+
+                  {importSource === 'bank' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                      {/* Left Column: Bank list */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-zinc-500 dark:text-zinc-455 uppercase tracking-wider">
+                            Välj övningar från banken
+                          </label>
+                          <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                            {filteredBankExercises.length} st
+                          </span>
+                        </div>
+
+                        {/* Search & Category Filter */}
+                        <div className="space-y-2">
+                          <div className="relative">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+                            <input
+                              type="text"
+                              placeholder="Sök i övningsbanken..."
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-805 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-850 focus:border-indigo-505 rounded-xl text-xs font-medium outline-none transition-all placeholder:text-zinc-405"
+                            />
+                          </div>
+                          
+                          <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none whitespace-nowrap">
+                            {bankCategoriesList.map(cat => (
+                              <button
+                                key={cat}
+                                type="button"
+                                onClick={() => setBankCategoryFilter(cat)}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                  bankCategoryFilter === cat
+                                    ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm'
+                                    : 'bg-zinc-50 dark:bg-zinc-850 text-zinc-500 dark:text-zinc-400/80 border border-zinc-200 dark:border-zinc-700'
+                                }`}
+                              >
+                                {cat}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Exercises Checklist */}
+                        <div className="border border-zinc-200/60 dark:border-zinc-800 rounded-2xl overflow-hidden max-h-[300px] overflow-y-auto custom-scrollbar divide-y divide-zinc-150 dark:divide-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
+                          {filteredBankExercises.length === 0 ? (
+                            <div className="p-8 text-center text-zinc-400 text-xs font-medium">
+                              Inga sparade övningar hittades i banken.
+                            </div>
+                          ) : (
+                            filteredBankExercises.map((ex) => {
+                              const isChecked = importSelectedBankIds.has(ex.id);
+                              const isPreviewed = ex.id === previewBankExerciseId;
+                              return (
+                                <div
+                                  key={ex.id}
+                                  className={`w-full text-left p-3.5 flex items-center justify-between transition-colors cursor-pointer ${
+                                    isPreviewed
+                                      ? 'bg-indigo-500/5 dark:bg-indigo-500/10'
+                                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-850'
+                                  }`}
+                                  onClick={() => {
+                                    setPreviewBankExerciseId(ex.id);
+                                  }}
+                                >
+                                  <div className="flex items-start gap-3 min-w-0 pr-2">
+                                    <div 
+                                      className="pt-0.5" 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const updated = new Set(importSelectedBankIds);
+                                        if (updated.has(ex.id)) {
+                                          updated.delete(ex.id);
+                                        } else {
+                                          updated.add(ex.id);
+                                        }
+                                        setImportSelectedBankIds(updated);
+                                      }}
+                                    >
+                                      <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${
+                                        isChecked
+                                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                                          : 'border-zinc-300 dark:border-zinc-705 text-transparent'
+                                      }`}>
+                                        <Check size={12} strokeWidth={4} />
+                                      </div>
+                                    </div>
+                                    <div className="min-w-0">
+                                      <h4 className="text-sm font-black text-zinc-900 dark:text-white truncate">
+                                        {ex.name}
+                                      </h4>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block truncate">
+                                        {(ex.categories && ex.categories.length > 0 ? ex.categories.join(', ') : (ex.category || 'Teknik'))} • {ex.duration || 15} min
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <ChevronRight size={14} className="text-zinc-350 shrink-0" />
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right Column: Preview & Final action */}
+                      <div className="space-y-4">
+                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-455 uppercase tracking-wider block">
+                          Förhandsvisning av markerad övning
+                        </label>
+
+                        {previewExercise ? (
+                          <div className="bg-zinc-50 dark:bg-zinc-950/25 border border-zinc-200/50 dark:border-zinc-805 rounded-2xl p-5 space-y-4 animate-in fade-in duration-200">
+                            {previewExercise.imageUrl && (
+                              <div className="w-full h-32 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/20">
+                                <img
+                                  src={previewExercise.imageUrl}
+                                  alt={previewExercise.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-650 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/30 px-2 py-0.5 rounded text-[10px] uppercase font-black tracking-wider">
+                                {previewExercise.categories && previewExercise.categories.length > 0 ? previewExercise.categories.join(' • ') : (previewExercise.category || 'Teknik')}
+                              </span>
+                              <h4 className="text-lg font-black text-zinc-900 dark:text-white mt-2 leading-none">
+                                {previewExercise.name}
+                              </h4>
+                              <p className="text-zinc-400 dark:text-zinc-505 text-xs font-semibold mt-1">
+                                Rekommenderad tid: {previewExercise.duration} min
+                              </p>
+                            </div>
+
+                            {previewExercise.description ? (
+                              <p className="text-zinc-500 dark:text-zinc-400 text-xs leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap font-medium custom-scrollbar">
+                                {previewExercise.description}
+                              </p>
+                            ) : (
+                              <p className="text-zinc-350 dark:text-zinc-650 text-xs italic">Ingen beskrivning sparad</p>
+                            )}
+
+                            <div className="flex items-center justify-between pt-3 border-t border-zinc-150 dark:border-zinc-805">
+                              {previewExercise.externalLink ? (
+                                <a
+                                  href={previewExercise.externalLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs font-black text-indigo-650 dark:text-indigo-400 hover:underline"
+                                >
+                                  <ExternalLink size={13} />
+                                  Gå till länk
+                                </a>
+                              ) : (
+                                <div />
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = new Set(importSelectedBankIds);
+                                  if (updated.has(previewExercise.id)) {
+                                    updated.delete(previewExercise.id);
+                                  } else {
+                                    updated.add(previewExercise.id);
+                                  }
+                                  setImportSelectedBankIds(updated);
+                                }}
+                                className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all border ${
+                                  importSelectedBankIds.has(previewExercise.id)
+                                    ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30'
+                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-sm'
+                                }`}
+                              >
+                                {importSelectedBankIds.has(previewExercise.id) ? 'Vald ✓' : 'Välj övning'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="border border-dashed border-zinc-200 dark:border-zinc-805 rounded-2xl p-10 text-center text-zinc-400 flex flex-col items-center justify-center min-h-[290px]">
+                            <Info size={32} className="text-zinc-350 mb-2" />
+                            <p className="font-bold text-sm">Ingen övning tillgänglig</p>
+                            <p className="text-xs max-w-xs mt-1">Skapa först övningar i din övningsbank.</p>
+                          </div>
+                        )}
+
+
+                      </div>
                     </div>
                   ) : (
-                    <div>
+                    otherSessions.filter(s => s.moments && s.moments.length > 0).length === 0 ? (
+                      <div className="text-center py-12 text-zinc-400">
+                        <AlertCircle className="mx-auto mb-3 text-zinc-350" size={48} />
+                        <p className="font-bold">Hittade inga andra träningspass med planerade övningar</p>
+                        <p className="text-xs mt-2 max-w-sm mx-auto">Det måste finnas andra träningspass som innehåller sparade övningar för att kunna hämta från dem.</p>
+                      </div>
+                    ) : (
+                      <div>
                       {/* Step Indicator on Mobile */}
                       <div className="md:hidden flex items-center gap-2 mb-4 px-1">
                         <div className={`flex-1 h-1.5 rounded-full transition-colors ${mobileStep === 1 ? 'bg-indigo-600' : 'bg-zinc-200 dark:bg-zinc-800'}`} />
@@ -482,29 +790,15 @@ export default function MomentCopyModal({
                                 })}
                               </div>
 
-                              {/* Action Button */}
-                              <div className="pt-2">
-                                <button
-                                  onClick={handleImport}
-                                  disabled={importSelectedMomentIds.size === 0}
-                                  className={`w-full py-4 rounded-xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
-                                    importSelectedMomentIds.size > 0
-                                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-150 dark:shadow-none'
-                                      : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-                                  }`}
-                                >
-                                  <Download size={14} />
-                                  Hämta {importSelectedMomentIds.size} valda {importSelectedMomentIds.size === 1 ? 'övning' : 'övningar'}
-                                </button>
-                              </div>
+
 
                             </div>
                           )}
                         </div>
 
                       </div>
-                        </div>
-                    )}
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -591,20 +885,7 @@ export default function MomentCopyModal({
                             })}
                           </div>
 
-                          {/* Mobile Continue Button */}
-                          <div className="md:hidden pt-2">
-                            <button
-                              onClick={() => setMobileStep(2)}
-                              disabled={exportSelectedMomentIds.size === 0}
-                              className={`w-full py-4 rounded-xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
-                                exportSelectedMomentIds.size > 0
-                                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-150 dark:shadow-none'
-                                  : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
-                              }`}
-                            >
-                              Gå vidare till mottagare →
-                            </button>
-                          </div>
+
                         </div>
 
                         {/* Right Side: Select Target Sessions to write to */}
@@ -686,21 +967,7 @@ export default function MomentCopyModal({
                             )}
                           </div>
 
-                          {/* Export Action Trigger Button */}
-                          <div className="pt-2">
-                            <button
-                              onClick={handleExport}
-                              disabled={exportSelectedMomentIds.size === 0 || exportTargetSessionIds.size === 0}
-                              className={`w-full py-4 rounded-xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
-                                exportSelectedMomentIds.size > 0 && exportTargetSessionIds.size > 0
-                                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-150 dark:shadow-none'
-                                  : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
-                              }`}
-                            >
-                              <Upload size={14} />
-                              Kopiera {exportSelectedMomentIds.size} övningar till {exportTargetSessionIds.size} {exportTargetSessionIds.size === 1 ? 'pass' : 'pass'}
-                            </button>
-                          </div>
+
 
                         </div>
 
@@ -713,13 +980,89 @@ export default function MomentCopyModal({
             </div>
 
             {/* Footer */}
-            <div className="p-6 bg-zinc-50 dark:bg-zinc-950/20 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+            <div className="p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950/20 border-t border-zinc-100 dark:border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between items-center gap-3">
               <button
                 onClick={handleClose}
-                className="px-6 py-3 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-350 rounded-2xl font-black uppercase tracking-wider text-xs transition-colors"
+                className="w-full sm:w-auto px-6 py-3 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-350 rounded-2xl font-black uppercase tracking-wider text-xs transition-colors text-center"
               >
                 Stäng
               </button>
+
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-3">
+                {/* 1. Import tab - Bank Source */}
+                {activeTab === 'import' && importSource === 'bank' && (
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    disabled={importSelectedBankIds.size === 0}
+                    className={`w-full sm:w-auto px-6 py-3 rounded-2xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
+                      importSelectedBankIds.size > 0
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none cursor-pointer'
+                        : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                    }`}
+                  >
+                    <Download size={14} />
+                    Hämta {importSelectedBankIds.size} valda
+                  </button>
+                )}
+
+                {/* 2. Import tab - Sessions Source */}
+                {activeTab === 'import' && importSource === 'sessions' && selectedSourceSessionId && (
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    disabled={importSelectedMomentIds.size === 0}
+                    className={`px-6 py-3 rounded-2xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
+                      mobileStep === 2 ? 'w-full md:w-auto flex' : 'hidden md:flex'
+                    } ${
+                      importSelectedMomentIds.size > 0
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none cursor-pointer'
+                        : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                    }`}
+                  >
+                    <Download size={14} />
+                    Hämta {importSelectedMomentIds.size} valda {importSelectedMomentIds.size === 1 ? 'övning' : 'övningar'}
+                  </button>
+                )}
+
+                {/* 3. Export tab - Step/Tab actions */}
+                {activeTab === 'export' && currentSession.moments.length > 0 && otherSessions.length > 0 && (
+                  <>
+                    {/* Export Action Trigger Button (Desktop, or Mobile Step 2) */}
+                    <button
+                      type="button"
+                      onClick={handleExport}
+                      disabled={exportSelectedMomentIds.size === 0 || exportTargetSessionIds.size === 0}
+                      className={`px-6 py-3 rounded-2xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
+                        mobileStep === 2 ? 'w-full md:w-auto flex' : 'hidden md:flex'
+                      } ${
+                        exportSelectedMomentIds.size > 0 && exportTargetSessionIds.size > 0
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
+                          : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                      }`}
+                    >
+                      <Upload size={14} />
+                      Kopiera {exportSelectedMomentIds.size} {exportSelectedMomentIds.size === 1 ? 'övning' : 'övningar'} till {exportTargetSessionIds.size} {exportTargetSessionIds.size === 1 ? 'pass' : 'pass'}
+                    </button>
+
+                    {/* Mobile Step 1 Continue Button */}
+                    <button
+                      type="button"
+                      onClick={() => setMobileStep(2)}
+                      disabled={exportSelectedMomentIds.size === 0}
+                      className={`md:hidden px-6 py-3 rounded-2xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
+                        mobileStep === 1 ? 'w-full flex' : 'hidden'
+                      } ${
+                        exportSelectedMomentIds.size > 0
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
+                          : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                      }`}
+                    >
+                      Gå vidare till mottagare →
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
           </motion.div>

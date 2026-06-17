@@ -5,7 +5,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -347,8 +347,8 @@ export default function LineupBuilder({
   const [showNumber, setShowNumber] = useState(lineup?.showNumber ?? true);
   const [teamLogoUrl, setTeamLogoUrl] = useState(lineup?.teamLogoUrl || '');
   const [pitchType, setPitchType] = useState<'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black'>(lineup?.pitchType || 'classic');
-  const [orientation, setOrientation] = useState<'vertical' | 'landscape'>(lineup?.orientation || 'vertical');
-  const [attackDirection, setAttackDirection] = useState<'up' | 'down' | 'left' | 'right'>(lineup?.attackDirection || 'up');
+  const [orientation, setOrientation] = useState<'vertical' | 'landscape'>('vertical');
+  const [attackDirection, setAttackDirection] = useState<'up' | 'down' | 'left' | 'right'>('up');
   const [currentFormation, setCurrentFormation] = useState<string>(lineup?.formation || '');
   
   // Custom Logo Upload States
@@ -360,8 +360,7 @@ export default function LineupBuilder({
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [isLayoutExpanded, setIsLayoutExpanded] = useState(false);
-  const [isZoomExpanded, setIsZoomExpanded] = useState(false);
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const [isFormationsExpanded, setIsFormationsExpanded] = useState(true);
   const [hoveredPlayerId, setHoveredPlayerId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -399,11 +398,12 @@ export default function LineupBuilder({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedForEdit, setSelectedForEdit] = useState<string | null>(null); // LineupPlayer id
   const [pickerMode, setPickerMode] = useState<'starter' | 'sub' | null>(null);
+  const [sortBySelected, setSortBySelected] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [isControlsVisible, setIsControlsVisible] = useState(true);
-  const [isDrawingsVisible, setIsDrawingsVisible] = useState(true);
+  const [isControlsVisible, setIsControlsVisible] = useState(false);
+  const [isDrawingsVisible, setIsDrawingsVisible] = useState(false);
   const [showDelaunayNetwork, setShowDelaunayNetwork] = useState(false);
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -419,7 +419,7 @@ export default function LineupBuilder({
   const markerSuffix = useMemo(() => Math.random().toString(36).substring(2, 7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle'>('pen');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle'>('move');
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [pitchAspectRatio, setPitchAspectRatio] = useState(1);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
@@ -686,8 +686,6 @@ export default function LineupBuilder({
       setShowNumber(lineup.showNumber ?? true);
       setTeamLogoUrl(lineup.teamLogoUrl || '');
       setPitchType(lineup.pitchType || 'classic');
-      setOrientation(lineup.orientation || 'vertical');
-      setAttackDirection(lineup.attackDirection || (lineup.orientation === 'landscape' ? 'left' : 'up'));
       setCurrentFormation(lineup.formation || '');
       setTeamNotes(lineup.notes?.team?.text || '');
       setTeamMedia(lineup.notes?.team?.media || []);
@@ -1529,7 +1527,7 @@ export default function LineupBuilder({
     if (!isStillDifferent) {
       setHasUnsavedChanges(false);
     }
-  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, tacticalPlayers, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
+  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, tacticalPlayers, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
 
   // Auto-save changes back to the parent
   useEffect(() => {
@@ -1551,8 +1549,8 @@ export default function LineupBuilder({
       showNumber,
       teamLogoUrl,
       pitchType,
-      orientation,
-      attackDirection,
+      orientation: lineup.orientation,
+      attackDirection: lineup.attackDirection,
       formation: currentFormation,
       notes: {
         team: { text: teamNotes, media: teamMedia },
@@ -1606,8 +1604,6 @@ export default function LineupBuilder({
       lineup.teamLogoUrl !== teamLogoUrl ||
       lineup.formation !== currentFormation ||
       pitchType !== (lineup.pitchType || 'classic') ||
-      orientation !== (lineup.orientation || 'vertical') ||
-      attackDirection !== (lineup.attackDirection || (orientation === 'landscape' ? 'left' : 'up')) ||
       JSON.stringify(lineup.players || []) !== JSON.stringify(players) ||
       JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard) ||
       JSON.stringify(remoteNotes) !== JSON.stringify(currentState.notes);
@@ -1730,7 +1726,7 @@ export default function LineupBuilder({
     setShowOpponentFormationModal(false);
     setShowOpponents(true);
     setHasUnsavedChanges(true);
-    setTacticalTool('pen'); // Switch back to pen for convenience
+    setTacticalTool('move'); // Switch back to move for convenience
   };
 
   const handleMediaUpload = async (file: File, type: 'team' | 'opponent') => {
@@ -2272,7 +2268,7 @@ export default function LineupBuilder({
         className={`transition-all ${
           isFieldMaximized 
             ? 'max-w-none bg-transparent border-none shadow-none rounded-[40px] !p-0 w-full' 
-            : `bg-white dark:bg-zinc-900 border-y sm:border border-zinc-100 dark:border-zinc-800/80 rounded-none sm:rounded-3xl shadow-none sm:shadow-xl p-0 sm:p-6 mb-2 sm:mb-4 ${
+            : `bg-white dark:bg-zinc-900 border-y sm:border border-zinc-100 dark:border-zinc-800/80 rounded-none sm:rounded-3xl shadow-none sm:shadow-xl p-1 sm:p-4 mb-2 sm:mb-3 ${
                 orientation === 'landscape' ? 'max-w-[1380px]' : 'max-w-3xl'
               } mx-auto w-full`
         } ${isSimplified ? 'w-full mx-auto' : ''}`}
@@ -2381,11 +2377,11 @@ export default function LineupBuilder({
 
         {/* Pitch and Bench Side-by-Side Flex Layout */}
         <div 
-          className={`flex ${!isFieldMaximized && orientation === 'landscape' ? 'flex-col lg:flex-row gap-6 items-center lg:items-center justify-center' : 'flex-col'} w-full origin-top`}
+          className={`flex ${!isFieldMaximized && orientation === 'landscape' ? 'flex-col lg:flex-row gap-4 items-center lg:items-start justify-center' : 'flex-col'} w-full origin-top`}
           style={previewZoom !== 1 ? { zoom: previewZoom } : undefined}
         >
           {/* Pitch Container */}
-          <div className={`${!isFieldMaximized && orientation === 'landscape' ? 'flex-1 min-w-0 max-w-full flex justify-center' : 'w-full'} relative`}>
+          <div className={`${!isFieldMaximized && orientation === 'landscape' ? 'w-auto flex-shrink-0 flex justify-center' : 'w-full'} relative`}>
           {/* Tactical Toolbar for selected drawing */}
           {(selectedDrawingId || tacticalTool === 'eraser') && !isTransforming && (
             <div 
@@ -2417,7 +2413,7 @@ export default function LineupBuilder({
                   <button 
                     onClick={() => {
                       setSelectedDrawingId(null);
-                      setTacticalTool('pen');
+                      setTacticalTool('move');
                     }}
                     className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors ml-1"
                     title="Avsluta suddgummi"
@@ -2575,13 +2571,13 @@ export default function LineupBuilder({
               width: isFieldMaximized 
                 ? (orientation === 'landscape' ? `min(98vw, calc((100vh - 24px) * ${R}))` : `min(98vw, calc((100vh - 24px) * ${invR}))`)
                 : (orientation === 'landscape' 
-                    ? `min(96vw, 1024px, calc((100vh - 220px) * ${R}))` 
-                    : `min(100%, 680px)`),
+                    ? `min(96vw, 1024px, calc((100vh - 160px) * ${R}))` 
+                    : `min(100%, 680px, calc((100vh - 240px) * ${invR}))`),
               height: isFieldMaximized
                 ? (orientation === 'landscape' ? `min(calc(98vw / ${R}), calc(100vh - 24px))` : `min(calc(98vw / ${invR}), calc(100vh - 24px))`)
                 : (orientation === 'landscape' 
-                    ? `min(calc(96vw / ${R}), 663px, calc(100vh - 220px))` 
-                    : `auto`),
+                    ? `min(calc(96vw / ${R}), 663px, calc(100vh - 160px))` 
+                    : `min(calc(680px * ${R}), calc(100vh - 240px))`),
               aspectRatio: orientation === 'landscape' ? '105/68' : '68/105',
               backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
                 `repeating-linear-gradient(
@@ -3176,14 +3172,14 @@ export default function LineupBuilder({
 
         {/* Bench Area */}
         {!isFieldMaximized && (
-          <div className={`bench-container mb-0 ${orientation === 'landscape' ? 'w-full lg:w-[320px] lg:shrink-0 lg:max-h-[85vh] lg:overflow-y-auto no-scrollbar' : 'w-full'}`}>
+          <div className={`bench-container mb-0 ${orientation === 'landscape' ? 'w-full lg:w-[124px] lg:shrink-0 lg:max-h-[85vh] lg:overflow-y-auto no-scrollbar' : 'w-full'}`}>
             <Reorder.Group 
               axis={orientation === 'landscape' ? "y" : "x"}
               values={subs}
               onReorder={handleReorderSubs}
               className={`p-1.5 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-none sm:rounded-3xl border-y sm:border border-x-0 sm:border-x border-zinc-100 dark:border-zinc-800 transition-all ${
                 orientation === 'landscape'
-                  ? 'grid grid-cols-4 lg:grid-cols-3 gap-2 lg:gap-3 justify-center w-full'
+                  ? 'grid grid-cols-4 lg:flex lg:flex-col gap-2 lg:gap-4 justify-center lg:justify-start lg:items-center w-full lg:py-6'
                   : subs.length > 7 
                     ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
                     : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
@@ -3340,7 +3336,16 @@ export default function LineupBuilder({
                 <Network size={16} />
               </button>
               <button
-                onClick={() => setIsControlsVisible(!isControlsVisible)}
+                onClick={() => {
+                  const nextVisible = !isControlsVisible;
+                  setIsControlsVisible(nextVisible);
+                  if (nextVisible) {
+                    setTacticalTool('pen');
+                    setIsDrawingsVisible(true);
+                  } else {
+                    setTacticalTool('move');
+                  }
+                }}
                 className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
                   isControlsVisible 
                     ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
@@ -3438,7 +3443,6 @@ export default function LineupBuilder({
                   } else {
                     setAttackDirection('up');
                   }
-                  setHasUnsavedChanges(true);
                 }}
                 className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
                 title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
@@ -4189,7 +4193,6 @@ export default function LineupBuilder({
                   } else {
                     setAttackDirection('up');
                   }
-                  setHasUnsavedChanges(true);
                 }}
                 className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
                   orientation === 'landscape' 
@@ -4234,565 +4237,582 @@ export default function LineupBuilder({
             </div>
           </div>
         </div>
-      
-        <div className="flex flex-col gap-4 mt-6">
-          {/* Section 1: Formations at the TOP */}
-          {/* Section: Formationer */}
-          <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-              <button 
-                onClick={() => setIsFormationsExpanded(!isFormationsExpanded)}
-                className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group/header"
-              >
-                <div className="flex items-center justify-between flex-1 pr-4">
-                  <div className="flex items-center gap-2">
-                    <Footprints size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors" />
-                    <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Formationer</span>
-                  </div>
-                  {currentFormation && (
-                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 rounded-full uppercase border border-indigo-100 dark:border-indigo-800/50">
-                      {currentFormation}
-                    </span>
-                  )}
-                </div>
-                {isFormationsExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-              </button>
 
-              <motion.div
-                initial={false}
-                animate={{ height: isFormationsExpanded ? 'auto' : 0, opacity: isFormationsExpanded ? 1 : 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-wrap gap-2 p-5 pt-0">
-                  {/* Dynamic Quick Access based on pins - Ensure unique IDs */}
-                  {Array.from(new Set(pinnedFormationIds)).map(id => {
-                    // Check if it's a standard formation first
-                    const temp = FORMATION_TEMPLATES.find(t => t.id === id);
-                    if (temp) {
-                      const variant = temp.variants[0];
-                      const isSelected = currentFormation === variant.name;
+        <div className={`grid grid-cols-1 gap-6 mt-6 items-start w-full ${
+          showSavedLineups 
+            ? 'lg:grid-cols-2' 
+            : 'max-w-4xl mx-auto'
+        }`}>
+          {/* Column 1: Formationer & Inställningar för Zoom, Storlek och Layout */}
+          <div className="flex flex-col gap-6">
+            {/* Section: Formationer */}
+            <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                <button 
+                  onClick={() => setIsFormationsExpanded(!isFormationsExpanded)}
+                  className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group/header"
+                >
+                  <div className="flex items-center justify-between flex-1 pr-4">
+                    <div className="flex items-center gap-2">
+                      <Footprints size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors" />
+                      <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Formationer</span>
+                    </div>
+                    {currentFormation && (
+                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 rounded-full uppercase border border-indigo-100 dark:border-indigo-800/50">
+                        {currentFormation}
+                      </span>
+                    )}
+                  </div>
+                  {isFormationsExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+                </button>
+
+                <motion.div
+                  initial={false}
+                  animate={{ height: isFormationsExpanded ? 'auto' : 0, opacity: isFormationsExpanded ? 1 : 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-wrap gap-2 p-5 pt-0">
+                    {/* Dynamic Quick Access based on pins - Ensure unique IDs */}
+                    {Array.from(new Set(pinnedFormationIds)).map(id => {
+                      // Check if it's a standard formation first
+                      const temp = FORMATION_TEMPLATES.find(t => t.id === id);
+                      if (temp) {
+                        const variant = temp.variants[0];
+                        const isSelected = currentFormation === variant.name;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => applyFormation(variant)}
+                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
+                            }`}
+                          >
+                            {temp.name}
+                          </button>
+                        );
+                      }
+
+                      // Check if it's a custom formation
+                      const custom = customFormations.find(f => f.id === id);
+                      if (custom) {
+                        const isSelected = currentFormation === custom.name;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => applyFormation(custom)}
+                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                              isSelected
+                                ? 'bg-emerald-600 text-white shadow-md'
+                                : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
+                            }`}
+                          >
+                            {custom.name}
+                          </button>
+                        );
+                      }
+
+                      return null;
+                    })}
+                    
+                    {/* Fill defaults if no pins (fallback UX) */}
+                    {pinnedFormationIds.length === 0 && ['4-4-2', '4-3-3', '4-2-3-1'].map(id => {
+                      const temp = FORMATION_TEMPLATES.find(t => t.id === id);
+                      if (!temp) return null;
                       return (
                         <button
                           key={id}
-                          onClick={() => applyFormation(variant)}
-                          className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
-                            isSelected
-                              ? 'bg-indigo-600 text-white shadow-md'
-                              : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
-                          }`}
+                          onClick={() => applyFormation(temp.variants[0])}
+                          className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-50 dark:bg-zinc-955 text-zinc-650 dark:text-zinc-405 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 transition-all font-mono"
                         >
                           {temp.name}
                         </button>
                       );
-                    }
+                    })}
 
-                    // Check if it's a custom formation
-                    const custom = customFormations.find(f => f.id === id);
-                    if (custom) {
-                      const isSelected = currentFormation === custom.name;
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => applyFormation(custom)}
-                          className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
-                            isSelected
-                              ? 'bg-emerald-600 text-white shadow-md'
-                              : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
-                          }`}
-                        >
-                          {custom.name}
-                        </button>
-                      );
-                    }
-
-                    return null;
-                  })}
-                  
-                  {/* Fill defaults if no pins (fallback UX) */}
-                  {pinnedFormationIds.length === 0 && ['4-4-2', '4-3-3', '4-2-3-1'].map(id => {
-                    const temp = FORMATION_TEMPLATES.find(t => t.id === id);
-                    if (!temp) return null;
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => applyFormation(temp.variants[0])}
-                        className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 transition-all font-mono"
-                      >
-                        {temp.name}
-                      </button>
-                    );
-                  })}
-
-                  <button
-                    onClick={() => setShowFormationModal(true)}
-                    className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90 transition-all flex items-center gap-2"
-                  >
-                    <Plus size={14} />
-                    <span>Fler formationer</span>
-                  </button>
-                  <button
-                    onClick={() => setShowSaveFormation(true)}
-                    className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100 dark:shadow-none"
-                  >
-                    <Plus size={14} />
-                    <span>Spara egen formation</span>
-                  </button>
-                </div>
-              </motion.div>
-          </div>
-
-          {/* Section: Zoom & Scale */}
-          <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <button 
-              onClick={() => setIsZoomExpanded(!isZoomExpanded)}
-              className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Maximize2 size={16} className="text-zinc-400" />
-                <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Zoom & Storlek</span>
-              </div>
-              {isZoomExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-            </button>
-
-            <motion.div
-              initial={false}
-              animate={{ height: isZoomExpanded ? 'auto' : 0, opacity: isZoomExpanded ? 1 : 0 }}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-col gap-4 p-5 pt-0">
-                <div className="flex flex-col gap-2">
-                  <div className="flex justify-between items-center px-1">
-                    <div className="flex items-center gap-2">
-                       <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Zoom Gränssnitt</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(previewZoom * 100)}%</span>
-                      {previewZoom !== 1 && (
-                        <button 
-                          onClick={() => setPreviewZoom(1)}
-                          className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors text-zinc-400 hover:text-indigo-600"
-                          title="Återställ zoom"
-                        >
-                          <RotateCcw size={12} />
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => setShowFormationModal(true)}
+                      className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90 transition-all flex items-center gap-2"
+                    >
+                      <Plus size={14} />
+                      <span>Fler formationer</span>
+                    </button>
+                    <button
+                      onClick={() => setShowSaveFormation(true)}
+                      className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100 dark:shadow-none"
+                    >
+                      <Plus size={14} />
+                      <span>Spara egen formation</span>
+                    </button>
                   </div>
-                  <input 
-                    type="range" 
-                    min="0.5" 
-                    max="1.5" 
-                    step="0.01" 
-                    value={previewZoom}
-                    onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-                    className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
-                </div>
+                </motion.div>
+            </div>
 
-                <div className="flex flex-col gap-2">
-                  <div className="flex justify-between items-center px-1">
-                    <div className="flex items-center gap-2">
-                       <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Spelarstorlek</span>
+            {/* Combined Section: Zoom, Storlek & Layout */}
+            <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+              <button 
+                onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
+                className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group/header"
+              >
+                <div className="flex items-center gap-2">
+                  <Settings size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors" />
+                  <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Inställningar</span>
+                </div>
+                {isSettingsExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+              </button>
+
+              <motion.div
+                initial={false}
+                animate={{ height: isSettingsExpanded ? 'auto' : 0, opacity: isSettingsExpanded ? 1 : 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-col gap-6 p-5 pt-0">
+                  {/* Part 1: Zoom & Storlek (HÖGST UPP) */}
+                  <div className="flex flex-col gap-3">
+                    <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest ml-1">Zoom & Storlek</span>
+                    
+                    {/* Zoom interface rows */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/80">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none mb-1">Zoom Gränssnitt</span>
+                        <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400">Anpassa storleken på skärmen</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button 
+                          onClick={() => setPreviewZoom(Math.max(0.5, Math.round((previewZoom - 0.05) * 100) / 100))}
+                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                          title="Minska zoom"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <div className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
+                          <span className="text-xs font-mono font-black text-zinc-650 dark:text-zinc-300">
+                            {Math.round(previewZoom * 100)}%
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => setPreviewZoom(Math.min(1.5, Math.round((previewZoom + 0.05) * 100) / 100))}
+                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                          title="Öka zoom"
+                        >
+                          <Plus size={14} />
+                        </button>
+                        {previewZoom !== 1 && (
+                          <button 
+                            onClick={() => setPreviewZoom(1)}
+                            className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-indigo-650 transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                            title="Återställ zoom"
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md leading-none">{Math.round(playerScale * 100)}%</span>
-                      {playerScale !== 1 && (
+
+                    {/* Scale interface rows */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/80">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none mb-1">Spelarstorlek</span>
+                        <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400">Ändra cirklarnas storlek på spelplanen</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
                         <button 
                           onClick={() => {
-                            setPlayerScale(1);
+                            setPlayerScale(Math.max(0.5, Math.round((playerScale - 0.05) * 100) / 100));
                             setHasUnsavedChanges(true);
                           }}
-                          className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors text-zinc-400 hover:text-indigo-600"
-                          title="Återställ spelarstorlek"
+                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                          title="Minska spelarstorlek"
                         >
-                          <RotateCcw size={12} />
+                          <Minus size={14} />
                         </button>
-                      )}
+                        <div className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
+                          <span className="text-xs font-mono font-black text-zinc-650 dark:text-zinc-300">
+                            {Math.round(playerScale * 100)}%
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setPlayerScale(Math.min(1.5, Math.round((playerScale + 0.05) * 100) / 100));
+                            setHasUnsavedChanges(true);
+                          }}
+                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                          title="Öka spelarstorlek"
+                        >
+                          <Plus size={14} />
+                        </button>
+                        {playerScale !== 1 && (
+                          <button 
+                            onClick={() => {
+                              setPlayerScale(1);
+                              setHasUnsavedChanges(true);
+                            }}
+                            className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-indigo-650 transition-all border border-zinc-200/50 dark:border-zinc-800/80"
+                            title="Återställ spelarstorlek"
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <input 
-                    type="range" 
-                    min="0.5" 
-                    max="1.5" 
-                    step="0.05" 
-                    value={playerScale}
-                    onChange={(e) => {
-                      setPlayerScale(parseFloat(e.target.value));
-                      setHasUnsavedChanges(true);
-                    }}
-                    className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
-                </div>
-              </div>
-            </motion.div>
-          </div>
 
-          {/* Section 2: Layout Options */}
-          <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <button 
-              onClick={() => setIsLayoutExpanded(!isLayoutExpanded)}
-              className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <ClipboardList size={16} className="text-zinc-400" />
-                <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Layout</span>
-              </div>
-              {isLayoutExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-            </button>
+                  {/* Horizontal Line Divider */}
+                  <div className="h-[1px] bg-zinc-150 dark:bg-zinc-800/80 w-full" />
 
-            <motion.div
-              initial={false}
-              animate={{ height: isLayoutExpanded ? 'auto' : 0, opacity: isLayoutExpanded ? 1 : 0 }}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-col gap-6 p-5 pt-0">
-                <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Theme Style */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tema</span>
-                <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button
-                    onClick={() => {
-                      setNameTagStyle('light');
-                      setHasUnsavedChanges(true);
-                    }}
-                    className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
-                      nameTagStyle === 'light'
-                        ? 'bg-indigo-600 text-white shadow-lg'
-                        : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    Ljus
-                  </button>
-                  <button
-                    onClick={() => {
-                      setNameTagStyle('dark');
-                      setHasUnsavedChanges(true);
-                    }}
-                    className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
-                      nameTagStyle === 'dark'
-                        ? 'bg-indigo-600 text-white shadow-lg'
-                        : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    Mörk
-                  </button>
-                </div>
-              </div>
-
-              {/* Photo Toggle */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Foto</span>
-                <button
-                  onClick={() => {
-                    setShowPhoto(!showPhoto);
-                    setHasUnsavedChanges(true);
-                  }}
-                  className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                    showPhoto
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
-                  }`}
-                >
-                  <span className="text-[10px] font-black uppercase tracking-widest">{showPhoto ? 'Ja' : 'Nej'}</span>
-                  <Camera size={14} className={showPhoto ? 'text-white' : 'text-zinc-400'} />
-                </button>
-              </div>
-
-              {/* Number Toggle */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Nr</span>
-                <button
-                  onClick={() => {
-                    setShowNumber(!showNumber);
-                    setHasUnsavedChanges(true);
-                  }}
-                  className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                    showNumber
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
-                  }`}
-                >
-                  <span className="text-[10px] font-black uppercase tracking-widest">{showNumber ? 'Ja' : 'Nej'}</span>
-                  <div className={`w-3 h-3 rounded-md border-2 border-current flex items-center justify-center ${showNumber ? 'bg-white border-white' : 'border-zinc-400'}`}>
-                    {showNumber && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-sm" />}
-                  </div>
-                </button>
-              </div>
-
-              {/* Name Toggle */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Namn</span>
-                <button
-                  onClick={() => {
-                    setShowName(!showName);
-                    setHasUnsavedChanges(true);
-                  }}
-                  className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                    showName
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
-                  }`}
-                >
-                  <span className="text-[10px] font-black uppercase tracking-widest">{showName ? 'Ja' : 'Nej'}</span>
-                  <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
-                </button>
-              </div>
-
-              {/* Name Mode */}
-              <div className="flex flex-col gap-2 col-span-2 md:col-span-2 lg:col-span-3">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnformat</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button onClick={() => {
-                    setNameDisplayMode('first');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Förnamn</button>
-                  <button onClick={() => {
-                    setNameDisplayMode('last');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Efternamn</button>
-                  <button onClick={() => {
-                    setNameDisplayMode('full');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Hela namnet</button>
-                  <button onClick={() => {
-                    setNameDisplayMode('initials');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Initialer</button>
-                  <button onClick={() => {
-                    setNameDisplayMode('firstLastInitial');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'firstLastInitial' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Namn + I.</button>
-                  <button onClick={() => {
-                    setNameDisplayMode('initialLastName');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initialLastName' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>I. + Efternamn</button>
-                </div>
-              </div>
-
-              {/* Background Type */}
-              <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnskylt</span>
-                <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button onClick={() => {
-                    setNameBackgroundType('badge');
-                    setShowNameBackground(true);
-                    setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'badge' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Badge</button>
-                  <button onClick={() => {
-                    setNameBackgroundType('transparent');
-                    setShowNameBackground(true);
-                    setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'transparent' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Genomskinlig</button>
-                  <button onClick={() => {
-                    setNameBackgroundType('solid');
-                    setShowNameBackground(true);
-                    setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'solid' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Bakgrund</button>
-                  <button onClick={() => {
-                    setNameBackgroundType('none');
-                    setShowNameBackground(false);
-                    setHasUnsavedChanges(true);
-                  }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(!showNameBackground || nameBackgroundType === 'none') ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ingen</button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Planens utseende</span>
-                <div className="grid grid-cols-2 xs:grid-cols-3 gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <button onClick={() => {
-                    setPitchType('classic');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Grön Ränder</button>
-                  <button onClick={() => {
-                    setPitchType('blue-stripes');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Ränder</button>
-                  <button onClick={() => {
-                    setPitchType('grass');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Gräs</button>
-                  <button onClick={() => {
-                    setPitchType('blue-grass');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Gräs</button>
-                  <button onClick={() => {
-                    setPitchType('blue');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Mix Blå</button>
-                  <button onClick={() => {
-                    setPitchType('solid-blue');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Blå</button>
-                  <button onClick={() => {
-                    setPitchType('solid-white');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-white' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Vit</button>
-                  <button onClick={() => {
-                    setPitchType('solid-black');
-                    setHasUnsavedChanges(true);
-                  }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-black' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Svart</button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Anfallsriktning</span>
-                <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  {orientation === 'vertical' ? (
-                    <>
-                      <button onClick={() => {
-                        setAttackDirection('up');
-                        setHasUnsavedChanges(true);
-                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'up' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Uppåt</button>
-                      <button onClick={() => {
-                        setAttackDirection('down');
-                        setHasUnsavedChanges(true);
-                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'down' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Nedåt</button>
-                    </>
-                  ) : (
-                    <>
-                      <button onClick={() => {
-                        setAttackDirection('left');
-                        setHasUnsavedChanges(true);
-                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'left' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Vänster</button>
-                      <button onClick={() => {
-                        setAttackDirection('right');
-                        setHasUnsavedChanges(true);
-                      }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'right' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Höger</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-      </div>
-    </>
-    )}
-        {!isMaximized && showSavedLineups && (
-          <div className="mt-12 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
-              <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">Sparade Laguppställningar</h3>
-              <button
-                onClick={handleCreateNew}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-lg active:scale-95 w-full sm:w-auto"
-              >
-                <Plus size={16} />
-                <span>Skapa Ny</span>
-              </button>
-            </div>
-
-            <Reorder.Group 
-              axis="y" 
-              values={Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values())} 
-              onReorder={(reordered) => {
-                const archived = lineups.filter(l => l.isArchived);
-                onReorderLineups([...reordered, ...archived]);
-              }}
-              className="flex flex-col gap-3 w-full"
-            >
-              {lineups.filter(l => !l.isArchived).length === 0 ? (
-                <div className="p-8 text-center bg-white dark:bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
-                  <p className="text-zinc-400 font-medium italic">Inga sparade laguppställningar än...</p>
-                </div>
-              ) : (
-                Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => (
-                  <LineupReorderItem
-                    key={l.id}
-                    l={l}
-                    activeLineupId={lineup?.id}
-                    onSelectLineup={handleSelectLineupWithHistory}
-                    toggleArchive={toggleArchive}
-                    onCopyLineup={onCopyLineup}
-                    onDeleteLineup={onDeleteLineup}
-                    onEditTitle={openTitleEditForLineup}
-                  />
-                ))
-              )}
-            </Reorder.Group>
-
-            {/* Archived Lineups Section */}
-            {lineups.some(l => l.isArchived) && (
-              <div className="pt-4 mt-8 border-t border-zinc-100 dark:border-zinc-800">
-                <button 
-                  onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
-                  className="flex items-center justify-between w-full px-4 py-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all group"
-                >
-                  <div className="flex items-center gap-3">
-                    <Archive size={18} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
-                    <span className="text-sm font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
-                      Arkiverade ({lineups.filter(l => l.isArchived).length})
-                    </span>
-                  </div>
-                  {isArchiveExpanded ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
-                </button>
-
-                <AnimatePresence>
-                  {isArchiveExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="flex flex-col gap-3 w-full mt-4">
-                        {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
-                          <div 
-                            key={l.id}
-                            className="group p-4 bg-white/50 dark:bg-zinc-900/30 rounded-3xl border border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
+                  {/* Part 2: Layout */}
+                  <div className="flex flex-col gap-3">
+                    <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest ml-1">Layout</span>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {/* Theme Style */}
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tema</span>
+                        <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          <button
+                            onClick={() => {
+                              setNameTagStyle('light');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
+                              nameTagStyle === 'light'
+                                ? 'bg-indigo-600 text-white shadow-lg'
+                                : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
                           >
-                            <div 
-                              className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
-                              onClick={() => handleSelectLineupWithHistory(l.id)}
-                            >
-                              <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-sm">
-                                {l.matchTitle || 'Namnlös Match'}
-                              </h4>
-                              <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-loose truncate block">
-                                Arkiverad
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
-                              <button
-                                onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
-                                className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-950/20 rounded-lg transition-all"
-                                title="Redigera rubriker"
-                              >
-                                <Pencil size={16} />
-                              </button>
-                              <button
-                                onClick={(e) => toggleArchive(e, l.id)}
-                                className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
-                                title="Återställ"
-                              >
-                                <ArchiveRestore size={16} />
-                              </button>
-                              <button
-                                onClick={() => onCopyLineup(l.id)}
-                                className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg transition-all"
-                                title="Kopiera"
-                              >
-                                <Copy size={16} />
-                              </button>
-                              <button
-                                onClick={() => onDeleteLineup(l.id)}
-                                className="p-2 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all"
-                                title="Radera"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                            Ljus
+                          </button>
+                          <button
+                            onClick={() => {
+                              setNameTagStyle('dark');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
+                              nameTagStyle === 'dark'
+                                ? 'bg-indigo-600 text-white shadow-lg'
+                                : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            Mörk
+                          </button>
+                        </div>
                       </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
+
+                      {/* Photo Toggle */}
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Foto</span>
+                        <button
+                          onClick={() => {
+                            setShowPhoto(!showPhoto);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
+                            showPhoto
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                              : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-550 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-widest">{showPhoto ? 'Ja' : 'Nej'}</span>
+                          <Camera size={14} className={showPhoto ? 'text-white' : 'text-zinc-400'} />
+                        </button>
+                      </div>
+
+                      {/* Number Toggle */}
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Nr</span>
+                        <button
+                          onClick={() => {
+                            setShowNumber(!showNumber);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
+                            showNumber
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                              : 'bg-zinc-50 dark:bg-zinc-955 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-widest">{showNumber ? 'Ja' : 'Nej'}</span>
+                          <div className={`w-3 h-3 rounded-md border-2 border-current flex items-center justify-center ${showNumber ? 'bg-white border-white' : 'border-zinc-400'}`}>
+                            {showNumber && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-sm" />}
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Name Toggle */}
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black text-zinc-405 uppercase tracking-widest ml-1">Visa Namn</span>
+                        <button
+                          onClick={() => {
+                            setShowName(!showName);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
+                            showName
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                              : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-widest">{showName ? 'Ja' : 'Nej'}</span>
+                          <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
+                        </button>
+                      </div>
+
+                      {/* Name Mode */}
+                      <div className="flex flex-col gap-2 col-span-2 md:col-span-2 lg:col-span-3">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnformat</span>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          <button onClick={() => {
+                            setNameDisplayMode('first');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Förnamn</button>
+                          <button onClick={() => {
+                            setNameDisplayMode('last');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Efternamn</button>
+                          <button onClick={() => {
+                            setNameDisplayMode('full');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Hela namnet</button>
+                          <button onClick={() => {
+                            setNameDisplayMode('initials');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-405 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Initialer</button>
+                          <button onClick={() => {
+                            setNameDisplayMode('firstLastInitial');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'firstLastInitial' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-405 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Namn + I.</button>
+                          <button onClick={() => {
+                            setNameDisplayMode('initialLastName');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initialLastName' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-405 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>I. + Efternamn</button>
+                        </div>
+                      </div>
+
+                      {/* Background Type */}
+                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnskylt</span>
+                        <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          <button onClick={() => {
+                            setNameBackgroundType('badge');
+                            setShowNameBackground(true);
+                            setHasUnsavedChanges(true);
+                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'badge' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Badge</button>
+                          <button onClick={() => {
+                            setNameBackgroundType('transparent');
+                            setShowNameBackground(true);
+                            setHasUnsavedChanges(true);
+                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'transparent' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Genomskinlig</button>
+                          <button onClick={() => {
+                            setNameBackgroundType('solid');
+                            setShowNameBackground(true);
+                            setHasUnsavedChanges(true);
+                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'solid' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Bakgrund</button>
+                          <button onClick={() => {
+                            setNameBackgroundType('none');
+                            setShowNameBackground(false);
+                            setHasUnsavedChanges(true);
+                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(!showNameBackground || nameBackgroundType === 'none') ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Ingen</button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Planens utseende</span>
+                        <div className="grid grid-cols-2 xs:grid-cols-3 gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          <button onClick={() => {
+                            setPitchType('classic');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Grön Ränder</button>
+                          <button onClick={() => {
+                            setPitchType('blue-stripes');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Ränder</button>
+                          <button onClick={() => {
+                            setPitchType('grass');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Gräs</button>
+                          <button onClick={() => {
+                            setPitchType('blue-grass');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Blå Gräs</button>
+                          <button onClick={() => {
+                            setPitchType('blue');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Mix Blå</button>
+                          <button onClick={() => {
+                            setPitchType('solid-blue');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Blå</button>
+                          <button onClick={() => {
+                            setPitchType('solid-white');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-white' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Vit</button>
+                          <button onClick={() => {
+                            setPitchType('solid-black');
+                            setHasUnsavedChanges(true);
+                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-black' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Solid Svart</button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Anfallsriktning</span>
+                        <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          {orientation === 'vertical' ? (
+                            <>
+                              <button onClick={() => {
+                                setAttackDirection('up');
+                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'up' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Uppåt</button>
+                              <button onClick={() => {
+                                setAttackDirection('down');
+                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'down' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Nedåt</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => {
+                                setAttackDirection('left');
+                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'left' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Vänster</button>
+                              <button onClick={() => {
+                                setAttackDirection('right');
+                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'right' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400'}`}>Höger</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </motion.div>
+            </div>
           </div>
-        )}
+
+          {/* Column 2: Sparade laguppställningar */}
+          {showSavedLineups && (
+            <div className="flex flex-col gap-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+                <h3 className="text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-widest leading-none">Sparade Laguppställningar</h3>
+                <button
+                  onClick={handleCreateNew}
+                  className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-md active:scale-95 w-full sm:w-auto shrink-0"
+                >
+                  <Plus size={14} />
+                  <span>Skapa Ny</span>
+                </button>
+              </div>
+
+              <Reorder.Group 
+                axis="y" 
+                values={Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values())} 
+                onReorder={(reordered) => {
+                  const archived = lineups.filter(l => l.isArchived);
+                  onReorderLineups([...reordered, ...archived]);
+                }}
+                className="flex flex-col gap-3 w-full"
+              >
+                {lineups.filter(l => !l.isArchived).length === 0 ? (
+                  <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border-2 border-dashed border-zinc-150 dark:border-zinc-800/60">
+                    <p className="text-zinc-400 font-medium italic text-xs">Inga sparade laguppställningar än...</p>
+                  </div>
+                ) : (
+                  Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                    <LineupReorderItem
+                      key={l.id}
+                      l={l}
+                      activeLineupId={lineup?.id}
+                      onSelectLineup={handleSelectLineupWithHistory}
+                      toggleArchive={toggleArchive}
+                      onCopyLineup={onCopyLineup}
+                      onDeleteLineup={onDeleteLineup}
+                      onEditTitle={openTitleEditForLineup}
+                    />
+                  ))
+                )}
+              </Reorder.Group>
+
+              {/* Archived Lineups Section */}
+              {lineups.some(l => l.isArchived) && (
+                <div className="pt-4 mt-6 border-t border-zinc-100 dark:border-zinc-800">
+                  <button 
+                    onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                    className="flex items-center justify-between w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-955 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition-all group border border-zinc-150 dark:border-zinc-800/50"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Archive size={16} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
+                      <span className="text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-widest">
+                        Arkiverade ({lineups.filter(l => l.isArchived).length})
+                      </span>
+                    </div>
+                    {isArchiveExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+                  </button>
+
+                  <AnimatePresence>
+                    {isArchiveExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex flex-col gap-3 w-full mt-4">
+                          {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                            <div 
+                              key={l.id}
+                              className="group p-4 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-[20px] border border-zinc-100/80 dark:border-zinc-800 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
+                            >
+                              <div 
+                                className="flex-1 cursor-pointer min-w-0 pr-2" 
+                                onClick={() => handleSelectLineupWithHistory(l.id)}
+                              >
+                                <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-xs">
+                                  {l.matchTitle || 'Namnlös Match'}
+                                </h4>
+                                <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-none mt-1.5 block">
+                                  Arkiverad
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <button
+                                  onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
+                                  className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/40 rounded-lg transition-all"
+                                  title="Redigera rubriker"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  onClick={(e) => toggleArchive(e, l.id)}
+                                  className="p-1.5 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-150/50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
+                                  title="Återställ"
+                                >
+                                  <ArchiveRestore size={14} />
+                                </button>
+                                <button
+                                  onClick={() => onCopyLineup(l.id)}
+                                  className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/40 rounded-lg transition-all"
+                                  title="Kopiera"
+                                >
+                                  <Copy size={14} />
+                                </button>
+                                <button
+                                  onClick={() => onDeleteLineup(l.id)}
+                                  className="p-1.5 text-zinc-400 hover:text-red-650 dark:hover:text-red-405 hover:bg-red-150/50 dark:hover:bg-red-955/20 rounded-lg transition-all"
+                                  title="Radera"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </>
+    )}
       <AnimatePresence>
         {/* Logo Cropping Modal */}
         {showLogoPicker && logoToCrop && (
@@ -5755,74 +5775,121 @@ export default function LineupBuilder({
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                    {(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values()) as SquadPlayer[]).map(sp => {
-                      const itemInLineup = players.find(p => p.playerId === sp.id);
-                      const isCurrentMode = itemInLineup && (
-                        (pickerMode === 'starter' && !itemInLineup.isSubstitute) ||
-                        (pickerMode === 'sub' && itemInLineup.isSubstitute)
-                      );
-                      const isOtherMode = itemInLineup && !isCurrentMode;
+                  <div className="flex items-center justify-between gap-2 mb-3 px-1">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold">
+                      Spelare ({(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values())).length} st)
+                    </span>
+                    <button
+                      onClick={() => setSortBySelected(!sortBySelected)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
+                        sortBySelected
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                          : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                      }`}
+                      title={sortBySelected ? "Inaktivera sortering" : "Sortera valda först"}
+                    >
+                      <span className="shrink-0">Sortera valda först</span>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sortBySelected ? 'bg-white' : 'bg-zinc-400 dark:bg-zinc-650'}`} />
+                    </button>
+                  </div>
 
-                      return (
-                        <button
-                          key={sp.id}
-                          onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
-                          className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
-                            isCurrentMode 
-                              ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
-                              : isOtherMode
-                                ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors'
-                                : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:border-indigo-300 dark:hover:border-indigo-900/30 transition-colors'
-                          }`}
-                        >
-                          <div className="relative">
-                            <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'opacity-70' : ''}`}>
-                              {sp.photoUrl ? (
-                                <CachedImage 
-                                  src={sp.photoUrl} 
-                                  alt={sp.name} 
-                                  className="w-full h-full object-cover" 
-                                  loading="lazy"
-                                  decoding="async"
-                                />
-                              ) : (
-                                <User size={20} />
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {(() => {
+                      const uniqueSquadPlayers = Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values()) as SquadPlayer[];
+                      const sortedPlayers = !sortBySelected 
+                        ? uniqueSquadPlayers 
+                        : [...uniqueSquadPlayers].sort((a, b) => {
+                            const aItem = players.find(p => p.playerId === a.id);
+                            const bItem = players.find(p => p.playerId === b.id);
+                            
+                            const aIsCurrent = aItem && (
+                              (pickerMode === 'starter' && !aItem.isSubstitute) ||
+                              (pickerMode === 'sub' && aItem.isSubstitute)
+                            );
+                            const bIsCurrent = bItem && (
+                              (pickerMode === 'starter' && !bItem.isSubstitute) ||
+                              (pickerMode === 'sub' && bItem.isSubstitute)
+                            );
+
+                            if (aIsCurrent && !bIsCurrent) return -1;
+                            if (!aIsCurrent && bIsCurrent) return 1;
+                            
+                            const aIsOther = aItem && !aIsCurrent;
+                            const bIsOther = bItem && !bIsCurrent;
+                            if (aIsOther && !bIsOther) return -1;
+                            if (!aIsOther && bIsOther) return 1;
+
+                            return 0;
+                          });
+                      
+                      return sortedPlayers.map(sp => {
+                        const itemInLineup = players.find(p => p.playerId === sp.id);
+                        const isCurrentMode = itemInLineup && (
+                          (pickerMode === 'starter' && !itemInLineup.isSubstitute) ||
+                          (pickerMode === 'sub' && itemInLineup.isSubstitute)
+                        );
+                        const isOtherMode = itemInLineup && !isCurrentMode;
+
+                        return (
+                          <button
+                            key={sp.id}
+                            onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
+                              isCurrentMode 
+                                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
+                                : isOtherMode
+                                  ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors'
+                                  : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:border-indigo-300 dark:hover:border-indigo-900/30 transition-colors'
+                            }`}
+                          >
+                            <div className="relative">
+                              <div className={`w-10 h-10 bg-white dark:bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-400 shadow-sm overflow-hidden ${isOtherMode ? 'opacity-70' : ''}`}>
+                                {sp.photoUrl ? (
+                                  <CachedImage 
+                                    src={sp.photoUrl} 
+                                    alt={sp.name} 
+                                    className="w-full h-full object-cover" 
+                                    loading="lazy"
+                                    decoding="async"
+                                  />
+                                ) : (
+                                  <User size={20} />
+                                )}
+                              </div>
+                              {sp.number && (
+                                <div className={`absolute w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black border-2 shadow-sm transition-all ${
+                                  isCurrentMode 
+                                    ? 'bg-white text-indigo-600 border-indigo-600 -top-1.5 -left-1.5' 
+                                    : 'bg-indigo-600 text-white border-white dark:border-zinc-900 -top-1.5 -right-1.5'
+                                }`}>
+                                  {sp.number}
+                                </div>
+                              )}
+                              {isCurrentMode && !sp.number && (
+                                <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in">
+                                  <Check size={12} />
+                                </div>
+                              )}
+                              {isCurrentMode && sp.number && (
+                                <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in shadow-sm">
+                                  <Check size={10} />
+                                </div>
+                              )}
+                              {isOtherMode && (
+                                <div className="absolute -top-2 -right-2 bg-zinc-500 text-white rounded-full p-0.5 px-1.5 shadow-sm">
+                                  <span className="text-[7px] font-black uppercase tracking-tighter">{itemInLineup.isSubstitute ? 'BÄNK' : 'PLAN'}</span>
+                                </div>
                               )}
                             </div>
-                            {sp.number && (
-                              <div className={`absolute w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black border-2 shadow-sm transition-all ${
-                                isCurrentMode 
-                                  ? 'bg-white text-indigo-600 border-indigo-600 -top-1.5 -left-1.5' 
-                                  : 'bg-indigo-600 text-white border-white dark:border-zinc-900 -top-1.5 -right-1.5'
-                              }`}>
-                                {sp.number}
-                              </div>
-                            )}
-                            {isCurrentMode && !sp.number && (
-                              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in">
-                                <Check size={12} />
-                              </div>
-                            )}
-                            {isCurrentMode && sp.number && (
-                              <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 animate-in zoom-in shadow-sm">
-                                <Check size={10} />
-                              </div>
-                            )}
-                            {isOtherMode && (
-                              <div className="absolute -top-2 -right-2 bg-zinc-500 text-white rounded-full p-0.5 px-1.5 shadow-sm">
-                                <span className="text-[7px] font-black uppercase tracking-tighter">{itemInLineup.isSubstitute ? 'BÄNK' : 'PLAN'}</span>
-                              </div>
-                            )}
-                          </div>
-                          <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
-                            isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
-                          }`}>
-                            {sp.name}
-                          </span>
-                        </button>
-                      );
-                    })}
+                            <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
+                              isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
+                            }`}>
+                              {sp.name}
+                            </span>
+                          </button>
+                        );
+                      });
+                    })()}
                   </div>
                 </>
               ) : (
@@ -6077,7 +6144,13 @@ export default function LineupBuilder({
                 {/* Switch Orientation */}
                 <button
                   onClick={() => {
-                    setOrientation(orientation === 'landscape' ? 'portrait' : 'landscape');
+                    const newOrientation = orientation === 'landscape' ? 'vertical' : 'landscape';
+                    setOrientation(newOrientation);
+                    if (newOrientation === 'landscape') {
+                      setAttackDirection('right');
+                    } else {
+                      setAttackDirection('up');
+                    }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 hover:text-white text-zinc-300 rounded-xl transition-all text-[9px] font-black uppercase tracking-widest whitespace-nowrap"
                 >

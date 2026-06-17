@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
@@ -25,6 +25,10 @@ interface SessionEditorProps {
   initialTab?: 'schema' | 'attendance';
   allSessions?: TrainingSession[];
   onUpdateSession?: (updated: TrainingSession) => void;
+  exerciseBank?: any[];
+  exerciseBankCategories?: string[];
+  onSaveToBank?: (moment: SessionMoment) => any;
+  onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
 }
 
 interface MomentItemProps {
@@ -45,6 +49,9 @@ interface MomentItemProps {
   setConfirmDeleteExercise: (info: { exerciseId: string, momentId: string, name: string } | null) => void;
   sessionTitle?: string;
   key?: string;
+  exerciseBank?: any[];
+  onSaveToBank?: (moment: SessionMoment) => any;
+  onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
 }
 
 function MomentItem({ 
@@ -64,13 +71,44 @@ function MomentItem({
   onShowTeams,
   onViewImage,
   setConfirmDeleteExercise,
-  onAddAfter 
+  onAddAfter,
+  exerciseBank = [],
+  onSaveToBank,
+  onUpdateBankExercise
 }: MomentItemProps & { onAddAfter?: () => void }) {
   const dragControls = useDragControls();
   const [showMediaInputs, setShowMediaInputs] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [justUpdatedBank, setJustUpdatedBank] = useState(false);
+  const [justFetchedBank, setJustFetchedBank] = useState(false);
+
+  const bankExercise = useMemo(() => {
+    if (moment.bankExerciseId) {
+      return (exerciseBank || []).find((ex: any) => ex.id === moment.bankExerciseId);
+    }
+    if (!moment.name?.trim()) return null;
+    return (exerciseBank || []).find(
+      (ex: any) => ex.name?.trim().toLowerCase() === moment.name?.trim().toLowerCase()
+    );
+  }, [exerciseBank, moment.bankExerciseId, moment.name]);
+
+  const isSavedInBank = useMemo(() => {
+    return !!bankExercise;
+  }, [bankExercise]);
+
+  const hasModifications = useMemo(() => {
+    if (!bankExercise) return false;
+    return (
+      (moment.name || '').trim() !== (bankExercise.name || '').trim() ||
+      (moment.duration || 15) !== (bankExercise.duration || 15) ||
+      (moment.description || '').trim() !== (bankExercise.description || '').trim() ||
+      (moment.externalLink || '').trim() !== (bankExercise.externalLink || '').trim() ||
+      (moment.imageUrl || '').trim() !== (bankExercise.imageUrl || '').trim()
+    );
+  }, [moment, bankExercise]);
 
   useEffect(() => {
     const adjustHeight = () => {
@@ -198,7 +236,7 @@ function MomentItem({
           </div>
         </div>
         {/* Main moment info */}
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 min-w-0 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4">
             <div className="flex-1 min-w-0">
               {mode === 'plan' ? (
@@ -210,7 +248,7 @@ function MomentItem({
                   placeholder="Namn på moment..."
                 />
               ) : (
-                <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight break-words">
+                <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight break-words [overflow-wrap:anywhere]">
                   {moment.name || sessionTitle || 'Namnlöst moment'}
                 </h4>
               )}
@@ -251,7 +289,7 @@ function MomentItem({
             />
           ) : (
             moment.description && (
-               <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">
+               <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed break-words [overflow-wrap:anywhere]">
                  {moment.description}
                </p>
             )
@@ -374,12 +412,12 @@ function MomentItem({
                         <div className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 shrink-0">
                           {isYouTube(moment.externalLink) ? <Youtube size={16} /> : <LinkIcon size={16} />}
                         </div>
-                        <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 min-w-0 flex items-center gap-2">
                           <input
                             type="url"
                             value={moment.externalLink || ''}
                             onChange={(e) => updateMoment(moment.id, { externalLink: e.target.value })}
-                            className="flex-1 bg-transparent border-none p-0 text-base font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
+                            className="flex-1 min-w-0 bg-transparent border-none p-0 text-base font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
                             placeholder="Externt klipp eller länk (t.ex. YouTube)..."
                           />
                           {moment.externalLink && (
@@ -536,6 +574,91 @@ function MomentItem({
                     + Tävling
                   </button>
                 )}
+
+                {onSaveToBank && (
+                  <>
+                    {!isSavedInBank ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newBankId = onSaveToBank(moment);
+                          if (newBankId && typeof newBankId === 'string') {
+                            updateMoment(moment.id, { bankExerciseId: newBankId });
+                          }
+                        }}
+                        className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-zinc-50 dark:bg-zinc-900/50 text-zinc-650 dark:text-zinc-350 border-zinc-200 dark:border-zinc-705/55 hover:bg-zinc-100 dark:hover:bg-zinc-805"
+                      >
+                        <Library size={10} />
+                        <span>Spara till bank</span>
+                      </button>
+                    ) : (
+                      <>
+                        {hasModifications && onUpdateBankExercise ? (
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (bankExercise) {
+                                  if (!moment.bankExerciseId) {
+                                    updateMoment(moment.id, { bankExerciseId: bankExercise.id });
+                                  }
+                                  onUpdateBankExercise(bankExercise.id, {
+                                    name: moment.name,
+                                    duration: moment.duration || 15,
+                                    description: moment.description,
+                                    externalLink: moment.externalLink,
+                                    imageUrl: moment.imageUrl,
+                                    imageUrls: moment.imageUrl ? [moment.imageUrl] : undefined,
+                                  });
+                                  setJustUpdatedBank(true);
+                                  setTimeout(() => setJustUpdatedBank(false), 2000);
+                                }
+                              }}
+                              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/25 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40"
+                              title="Uppdatera övningen i övningsbanken med den här träningens ändringar"
+                            >
+                              <Upload size={11} />
+                              <span>{justUpdatedBank ? 'Bank uppdaterad!' : 'Uppdatera i banken'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (bankExercise) {
+                                  updateMoment(moment.id, {
+                                    name: bankExercise.name || '',
+                                    duration: bankExercise.duration || 15,
+                                    description: bankExercise.description || '',
+                                    externalLink: bankExercise.externalLink || '',
+                                    imageUrl: bankExercise.imageUrl || '',
+                                    imageUrls: bankExercise.imageUrls || (bankExercise.imageUrl ? [bankExercise.imageUrl] : []),
+                                    bankExerciseId: bankExercise.id,
+                                  });
+                                  setJustFetchedBank(true);
+                                  setTimeout(() => setJustFetchedBank(false), 2000);
+                                }
+                              }}
+                              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/25 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/40"
+                              title="Hämta den sparade versionen från övningsbanken och skriv över ändringarna i detta pass"
+                            >
+                              <Download size={11} className={justFetchedBank ? "animate-bounce" : ""} />
+                              <span>{justFetchedBank ? 'Hämtat!' : 'Hämta från banken'}</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30"
+                          >
+                            <Check size={11} className="stroke-[3]" />
+                            <span>{justUpdatedBank ? 'Bank uppdaterad!' : justFetchedBank ? 'Hämtat!' : 'Sparad i banken'}</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
               </>
             ) : (
               <div className="flex items-center gap-2">
@@ -611,7 +734,11 @@ export default function SessionEditor({
   onModeChange,
   initialTab = 'schema',
   allSessions,
-  onUpdateSession
+  onUpdateSession,
+  exerciseBank = [],
+  exerciseBankCategories = [],
+  onSaveToBank,
+  onUpdateBankExercise
 }: SessionEditorProps) {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -788,7 +915,7 @@ export default function SessionEditor({
   };
 
   return (
-    <div className="fixed inset-0 bg-zinc-50 dark:bg-black z-[60] flex flex-col">
+    <div ref={scrollContainerRef} className="fixed inset-0 bg-zinc-50 dark:bg-black z-[60] flex flex-col overflow-y-auto overflow-x-hidden">
       {/* Team Overview Modal */}
       <AnimatePresence>
         {selectedExerciseForTeams && currentExercise && (
@@ -897,8 +1024,8 @@ export default function SessionEditor({
         )}
       </AnimatePresence>
 
-      {/* Header */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 sticky top-0 z-50">
+      {/* Non-sticky Main Header Info */}
+      <div className="bg-white dark:bg-zinc-900 shrink-0 border-b border-zinc-100 dark:border-zinc-850">
         <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
           <button 
             onClick={onClose}
@@ -933,81 +1060,100 @@ export default function SessionEditor({
         </div>
 
         <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 pb-3 flex flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-[1.6fr_1fr] sm:flex sm:items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => mode === 'plan' && setShowTimePicker(true)}
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 h-11 rounded-xl border transition-colors w-full sm:w-auto ${
+                mode === 'plan' 
+                  ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700' 
+                  : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/30'
+              }`}
+            >
+              <Calendar size={15} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
+              <span className={`text-[11px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
+                {new Date(session.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
+              </span>
+              <div className={`w-px h-3.5 mx-0.5 sm:mx-1 shrink-0 ${mode === 'plan' ? "bg-zinc-300 dark:bg-zinc-700" : "bg-indigo-200 dark:bg-indigo-900/30"}`} />
+              <Clock size={15} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
+              <span className={`text-[11px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
+                {session.startTime} - {session.endTime || calculatedEndTime}
+              </span>
+            </button>
+
+            {!session.isCompleted ? (
               <button
-                onClick={() => mode === 'plan' && setShowTimePicker(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-colors ${
-                  mode === 'plan' 
-                    ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700' 
-                    : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/30'
-                }`}
+                onClick={() => onUpdate({ ...session, isCompleted: true })}
+                className="px-3 h-11 bg-green-600 text-white border border-transparent rounded-xl font-black flex items-center justify-center gap-1.5 text-[10px] md:text-xs shadow-lg shadow-green-100 dark:shadow-none transition-all active:scale-95 shrink-0 hover:bg-green-700 uppercase tracking-tight w-full sm:w-auto"
               >
-                <Calendar size={14} className={mode === 'plan' ? "text-zinc-400" : "text-indigo-400"} />
-                <span className={`text-[10px] font-bold ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
-                  {new Date(session.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
-                </span>
-                <div className={`w-px h-3 mx-1 ${mode === 'plan' ? "bg-zinc-200 dark:bg-zinc-700" : "bg-indigo-200 dark:bg-indigo-900/30"}`} />
-                <Clock size={14} className={mode === 'plan' ? "text-zinc-400" : "text-indigo-400"} />
-                <span className={`text-[10px] font-bold ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
-                  {session.startTime} - {session.endTime || calculatedEndTime}
-                </span>
+                <Check size={14} strokeWidth={3} className="shrink-0" />
+                <span className="truncate">Klarmarkera</span>
               </button>
+            ) : (
+              <button
+                onClick={() => onUpdate({ ...session, isCompleted: false })}
+                className="px-3 h-11 bg-green-100 text-green-705 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800 rounded-xl font-black flex items-center justify-center gap-1.5 text-[10px] md:text-xs transition-all active:scale-95 shrink-0 uppercase tracking-tight w-full sm:w-auto"
+              >
+                <Check size={14} className="shrink-0" />
+                <span className="truncate">Genomförd</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
-              {!session.isCompleted ? (
-                <button
-                  onClick={() => onUpdate({ ...session, isCompleted: true })}
-                  className="px-3 py-1.5 bg-green-600 text-white rounded-xl font-black flex items-center gap-1.5 text-[10px] shadow-lg shadow-green-100 dark:shadow-none transition-all active:scale-95 shrink-0 hover:bg-green-700 uppercase tracking-tight"
-                >
-                  <Check size={14} strokeWidth={3} />
-                  <span>Klarmarkera</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => onUpdate({ ...session, isCompleted: false })}
-                  className="px-3 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800 rounded-xl font-bold flex items-center gap-1.5 text-[10px] transition-all active:scale-95 shrink-0 uppercase tracking-tight"
-                >
-                  <Check size={14} />
-                  <span>Genomförd</span>
-                </button>
-              )}
-            </div>
-
-            <div className="flex p-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-800">
+      {/* Sticky Navigation and Mode Tabs Row */}
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-50 py-2.5 sm:py-3 shadow-md dark:shadow-zinc-950/20 shrink-0">
+        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4">
+          <div className="grid grid-cols-[1.6fr_1fr] sm:flex sm:items-center gap-2 w-full sm:w-auto">
+            {/* Steg-kontroll: Planera & Träna */}
+            <div className="flex items-center p-0.5 h-11 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shrink-0 w-full sm:w-auto">
               <button
                 onClick={() => {
                   setMode('plan');
                   setActiveTab('schema');
                 }}
-                className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all flex items-center gap-1.5 ${
-                  activeTab === 'schema' && mode === 'plan' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
+                className={`h-full px-2 xs:px-3 sm:px-4 rounded-lg text-[10px] xs:text-xs md:text-sm font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 xs:gap-1.5 flex-1 sm:flex-initial truncate ${
+                  activeTab === 'schema' && mode === 'plan' 
+                    ? 'bg-white text-zinc-900 dark:bg-zinc-700 dark:text-white border border-zinc-200/50 dark:border-zinc-600 shadow-sm scale-[1.01]' 
+                    : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-450 dark:hover:text-zinc-200'
                 }`}
               >
-                <Edit2 size={12} />
-                Planera
+                <Edit2 size={12} className={`shrink-0 ${activeTab === 'schema' && mode === 'plan' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'}`} />
+                <span className="truncate">Planera</span>
               </button>
+
+              <div className="px-0.5 text-zinc-350 dark:text-zinc-650 shrink-0">
+                <ChevronRight size={12} className="stroke-[2.5]" />
+              </div>
+
               <button
                 onClick={() => {
                   setMode('live');
                   setActiveTab('schema');
                 }}
-                className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all flex items-center gap-1.5 ${
-                  activeTab === 'schema' && mode === 'live' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
+                className={`h-full px-2 xs:px-3 sm:px-4 rounded-lg text-[10px] xs:text-xs md:text-sm font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 xs:gap-1.5 flex-1 sm:flex-initial truncate ${
+                  activeTab === 'schema' && mode === 'live'
+                    ? 'bg-white text-zinc-900 dark:bg-zinc-700 dark:text-white border border-zinc-200/50 dark:border-zinc-600 shadow-sm scale-[1.01]' 
+                    : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-450 dark:hover:text-zinc-200'
                 }`}
               >
-                <Play size={12} fill={activeTab === 'schema' && mode === 'live' ? 'currentColor' : 'none'} />
-                Träna
-              </button>
-              <button
-                onClick={() => setActiveTab('attendance')}
-                className={`px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tight transition-all flex items-center gap-1.5 ${
-                  activeTab === 'attendance' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-zinc-400'
-                }`}
-              >
-                <Users size={12} />
-                Deltagare ({session.attendance?.length || 0})
+                <Play size={12} fill={activeTab === 'schema' && mode === 'live' ? 'currentColor' : 'none'} className={`shrink-0 ${activeTab === 'schema' && mode === 'live' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'}`} />
+                <span className="truncate">Träna</span>
               </button>
             </div>
+
+            {/* Separat Deltagare-knapp */}
+            <button
+              onClick={() => setActiveTab('attendance')}
+              className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 w-full sm:w-auto ${
+                activeTab === 'attendance'
+                  ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-805 shadow-sm'
+                  : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+              }`}
+            >
+              <Users size={12} className={activeTab === 'attendance' ? 'text-indigo-500 shrink-0' : 'text-zinc-505 dark:text-zinc-400 shrink-0'} />
+              <span className="truncate">Deltagare ({session.attendance?.length || 0})</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1096,8 +1242,7 @@ export default function SessionEditor({
 
       {/* Content */}
       <div 
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-6"
+        className="flex-1 p-4 sm:p-6"
       >
         <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
           {activeTab === 'schema' ? (
@@ -1273,6 +1418,9 @@ export default function SessionEditor({
                     onShowTeams={(id) => setSelectedExerciseForTeams(id)}
                     onViewImage={(urls, idx) => setViewingImageInfo({ urls, index: idx })}
                     onAddAfter={() => addMoment(index)}
+                    exerciseBank={exerciseBank}
+                    onSaveToBank={onSaveToBank}
+                    onUpdateBankExercise={onUpdateBankExercise}
                   />
                 ))}
               </Reorder.Group>
@@ -1292,15 +1440,15 @@ export default function SessionEditor({
 
               {/* Completion button at bottom - very prominent */}
               {!session.isCompleted && (
-                <div className="pt-8 pb-12">
+                <div className="pt-6 pb-8 flex flex-col items-center justify-center">
                   <button
                     onClick={() => onUpdate({ ...session, isCompleted: true })}
-                    className="w-full py-6 px-6 bg-green-600 text-white rounded-[32px] font-black text-lg sm:text-xl flex items-center justify-center gap-3 sm:gap-4 shadow-xl shadow-green-100 dark:shadow-none hover:bg-green-700 transition-all active:scale-[0.98] uppercase tracking-wide"
+                    className="w-full max-w-xs py-3 px-4 bg-green-600 text-white rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-green-100/50 dark:shadow-none hover:bg-green-700 transition-all active:scale-[0.98] uppercase tracking-wider"
                   >
-                    <Check size={28} strokeWidth={3} className="shrink-0" />
-                    <span className="text-center leading-tight">Klarmarkera träningspass</span>
+                    <Check size={16} strokeWidth={3} className="shrink-0" />
+                    <span className="text-center leading-none">Klarmarkera träningspass</span>
                   </button>
-                  <p className="text-center text-zinc-400 text-xs font-bold uppercase tracking-widest mt-4">
+                  <p className="text-center text-zinc-400 text-[10px] font-bold uppercase tracking-wider mt-2.5">
                     Avsluta passet och arkivera det under genomförda
                   </p>
                 </div>
@@ -1438,6 +1586,8 @@ export default function SessionEditor({
           currentSession={session}
           allSessions={allSessions}
           onUpdateSession={onUpdateSession}
+          exerciseBank={exerciseBank}
+          exerciseBankCategories={exerciseBankCategories}
         />
       )}
     </div>

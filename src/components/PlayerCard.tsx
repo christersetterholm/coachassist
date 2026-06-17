@@ -140,7 +140,7 @@ export default function PlayerCard({
                     scale: 1.1,
                     pointerEvents: 'none'
                   }}
-                  className={`text-[8px] sm:text-[10px] font-bold text-white/80 bg-white/10 px-1.5 py-0.5 rounded-full cursor-grab active:cursor-grabbing touch-none z-50`}
+                  className={`text-[8px] sm:text-[10px] font-bold text-white/80 bg-white/10 px-1.5 py-0.5 rounded-full cursor-grab active:cursor-grabbing touch-none z-50 select-none`}
                 >
                   {p.name}
                 </motion.span>

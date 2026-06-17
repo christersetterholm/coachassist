@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, Calendar } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, Calendar, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData } from './types';
+import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment } from './types';
 import { auth, signInWithGoogle, db } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
@@ -40,7 +40,9 @@ const INITIAL_DATA: CoachData = {
   trainingSettings: {
     defaultStartTime: '18:00',
     defaultDuration: 90
-  }
+  },
+  exerciseBank: [],
+  exerciseBankCategories: []
 };
 
 const getSessionCategory = (session: TrainingSession): 'match' | 'training' | 'other' => {
@@ -107,7 +109,9 @@ export default function App() {
     seriesUrl = '',
     customFormations = [], 
     pinnedFormationIds = ['4-2-3-1', '4-4-2', '4-3-3'],
-    trainingSettings = INITIAL_DATA.trainingSettings
+    trainingSettings = INITIAL_DATA.trainingSettings,
+    exerciseBank = [],
+    exerciseBankCategories = []
   } = (data || INITIAL_DATA);
   const [sessionActionCount, setSessionActionCount] = useState(0);
   const [linkToMomentId, setLinkToMomentId] = useState<string | null>(null);
@@ -121,7 +125,7 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
   
-  const [view, setView] = useState<View>(() => {
+  const [view, _setView] = useState<View>(() => {
     const params = new URLSearchParams(window.location.search);
     const v = params.get('view');
     const shareId = params.get('share');
@@ -134,7 +138,28 @@ export default function App() {
     }
     return 'training';
   });
-  const [trainingTab, setTrainingTab] = useState<'planned' | 'completed' | 'exercises' | 'calendar_view'>('calendar_view');
+
+  const setView = (newView: View | ((prev: View) => View)) => {
+    // Aggressively blur any active elements (especially inputs / textareas) 
+    // BEFORE they get unmounted to completely prevent iOS "Undo/Shake to Undo" 
+    // ghost states.
+    try {
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl && typeof activeEl.blur === 'function') {
+        activeEl.blur();
+      }
+    } catch (e) {
+      console.error("Error blurring on setView:", e);
+    }
+    
+    try {
+      window.focus();
+    } catch (e) {}
+
+    _setView(newView);
+  };
+  const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view'>('calendar_view');
+  const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance'>('schema');
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
@@ -271,6 +296,8 @@ export default function App() {
       const savedSeriesUrl = localStorage.getItem('series_url');
       const savedCustomFormations = localStorage.getItem('custom_formations');
       const savedSettings = localStorage.getItem('training_settings');
+      const savedExerciseBank = localStorage.getItem('football_exercise_bank');
+      const savedExerciseBankCategories = localStorage.getItem('football_exercise_bank_categories');
 
       // Robust Deduplication to prevent duplicate keys across components
       const rawSquad = savedSquad ? JSON.parse(savedSquad) : [];
@@ -291,7 +318,9 @@ export default function App() {
         seriesUrl: savedSeriesUrl || '',
         customFormations: savedCustomFormations ? JSON.parse(savedCustomFormations) : [],
         pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-        trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
+        trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings,
+        exerciseBank: savedExerciseBank ? JSON.parse(savedExerciseBank) : [],
+        exerciseBankCategories: savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []
       };
 
       setData(newState);
@@ -329,12 +358,14 @@ export default function App() {
       localStorage.setItem('custom_formations', JSON.stringify(customFormations));
       localStorage.setItem('training_settings', JSON.stringify(trainingSettings));
       localStorage.setItem('pinned_formations', JSON.stringify(pinnedFormationIds));
+      localStorage.setItem('football_exercise_bank', JSON.stringify(exerciseBank));
+      localStorage.setItem('football_exercise_bank_categories', JSON.stringify(exerciseBankCategories));
       if (sessionActionCount > 0) {
         localStorage.setItem('last_local_sync_at', Date.now().toString());
       }
       localStorage.setItem('last_local_user_id', user ? user.uid : 'guest');
     }
-  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, isAuthReady, isInitialSyncDone]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, exerciseBank, exerciseBankCategories, isAuthReady, isInitialSyncDone]);
 
   // Clear data on user change
   useEffect(() => {
@@ -418,11 +449,15 @@ export default function App() {
               const savedTeamUrl = localStorage.getItem('team_url');
               const savedAdminUrl = localStorage.getItem('admin_url');
               const savedSeriesUrl = localStorage.getItem('series_url');
+              const savedDeletedSessions = localStorage.getItem('football_deleted_sessions');
+              const savedExerciseBank = localStorage.getItem('football_exercise_bank');
+              const savedExerciseBankCategories = localStorage.getItem('football_exercise_bank_categories');
 
               const newState: CoachData = {
                 squad: savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [],
                 exercises: savedExercises ? JSON.parse(savedExercises) : [],
                 sessions: savedSessions ? JSON.parse(savedSessions) : [],
+                deletedSessions: savedDeletedSessions ? JSON.parse(savedDeletedSessions) : [],
                 lineups: savedLineups ? JSON.parse(savedLineups) : [],
                 activeLineupId: savedActiveLineupId || null,
                 periods: savedPeriods ? JSON.parse(savedPeriods) : [],
@@ -433,7 +468,9 @@ export default function App() {
                 seriesUrl: savedSeriesUrl || '',
                 customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
                 pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-                trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
+                trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings,
+                exerciseBank: savedExerciseBank ? JSON.parse(savedExerciseBank) : [],
+                exerciseBankCategories: savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []
               };
               setData(newState);
               setSessionActionCount(1); // Force a push of this migrated data
@@ -497,7 +534,9 @@ export default function App() {
               seriesUrl: savedSeriesUrl || '',
               customFormations: localStorage.getItem('custom_formations') ? JSON.parse(localStorage.getItem('custom_formations')!) : [],
               pinnedFormationIds: localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-              trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings
+              trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings,
+              exerciseBank: localStorage.getItem('football_exercise_bank') ? JSON.parse(localStorage.getItem('football_exercise_bank')!) : [],
+              exerciseBankCategories: localStorage.getItem('football_exercise_bank_categories') ? JSON.parse(localStorage.getItem('football_exercise_bank_categories')!) : []
             };
 
             setData(localState);
@@ -543,7 +582,9 @@ export default function App() {
           seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
           pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
-          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings
+          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings,
+          exerciseBank: cloudData.exerciseBank || [],
+          exerciseBankCategories: cloudData.exerciseBankCategories || []
         };
 
         setData(newState);
@@ -583,7 +624,7 @@ export default function App() {
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid || isSyncing) return;
         
-        const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
+        const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories };
         const capturedActionCount = sessionActionCount;
         
         // Skip if current state matches what we last saw from cloud
@@ -626,7 +667,7 @@ export default function App() {
       const timeout = setTimeout(syncData, 5000); // 5000ms debounce delay to group rapid changes and save Firestore quota
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded]);
 
   // Sync shared leaderboards globally
   useEffect(() => {
@@ -1045,6 +1086,79 @@ export default function App() {
       sessions: prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
     }));
     setSessionActionCount(prev => prev + 1);
+  };
+
+  const addBankExercise = (exercise: Omit<BankExercise, 'id' | 'createdAt'>) => {
+    const newEx: BankExercise = {
+      ...exercise,
+      id: 'bank_' + Math.random().toString(36).substring(7),
+      createdAt: Date.now()
+    };
+    setData(prev => ({
+      ...prev,
+      exerciseBank: [newEx, ...(prev.exerciseBank || [])]
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const updateBankExercise = (id: string, updates: Partial<BankExercise>) => {
+    setData(prev => ({
+      ...prev,
+      exerciseBank: (prev.exerciseBank || []).map(ex => ex.id === id ? { ...ex, ...updates } : ex)
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const removeBankExercise = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      exerciseBank: (prev.exerciseBank || []).filter(ex => ex.id !== id)
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const addBankCategory = (category: string) => {
+    const trimmed = category.trim();
+    if (!trimmed) return;
+    setData(prev => {
+      const existing = prev.exerciseBankCategories || [];
+      if (existing.some(c => c.toLowerCase() === trimmed.toLowerCase())) return prev;
+      return {
+        ...prev,
+        exerciseBankCategories: [...existing, trimmed]
+      };
+    });
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const removeBankCategory = (category: string) => {
+    setData(prev => ({
+      ...prev,
+      exerciseBankCategories: (prev.exerciseBankCategories || []).filter(c => c !== category)
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const saveMomentToBank = (moment: SessionMoment) => {
+    const bankId = 'bank_' + Math.random().toString(36).substring(7);
+    const newEx: BankExercise = {
+      id: bankId,
+      name: moment.name || 'Namnlös övning',
+      duration: moment.duration || 15,
+      description: moment.description,
+      imageUrl: moment.imageUrl,
+      imageUrls: moment.imageUrls,
+      externalLink: moment.externalLink,
+      category: 'Annat',
+      categories: ['Annat'],
+      createdAt: Date.now()
+    };
+    setData(prev => ({
+      ...prev,
+      exerciseBank: [newEx, ...(prev.exerciseBank || [])]
+    }));
+    setSessionActionCount(prev => prev + 1);
+    return bankId;
   };
 
   const onDeleteSession = (id: string) => {
@@ -1466,7 +1580,7 @@ export default function App() {
     if (!user) return;
     setIsSyncing(true);
     const now = Date.now();
-    const currentState = { squad, exercises, sessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings };
+    const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories };
     try {
       await setDoc(doc(db, 'users', user.uid, 'config', 'state'), {
         ...currentState,
@@ -1508,6 +1622,7 @@ export default function App() {
           squad: cloudData.squad || [],
           exercises: cloudData.exercises || [],
           sessions: cloudData.sessions || [],
+          deletedSessions: cloudData.deletedSessions || [],
           lineups: cloudData.lineups || [],
           activeLineupId: cloudData.activeLineupId || null,
           periods: cloudData.periods || [],
@@ -1518,7 +1633,9 @@ export default function App() {
           seriesUrl: cloudData.seriesUrl || '',
           customFormations: cloudData.customFormations || [],
           pinnedFormationIds: cloudData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
-          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings
+          trainingSettings: cloudData.trainingSettings || INITIAL_DATA.trainingSettings,
+          exerciseBank: cloudData.exerciseBank || [],
+          exerciseBankCategories: cloudData.exerciseBankCategories || []
         };
         setData(newState);
         syncUserIdRef.current = user.uid;
@@ -1674,6 +1791,38 @@ export default function App() {
               )}
               {!sharedLeaderboardId && (
                 <>
+                  {view === 'exercise' ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowTeamOverview(true)}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30"
+                      title="Visa lagöversikt"
+                    >
+                      <Users size={20} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                      title={theme === 'light' ? 'Mörkt läge' : 'Ljust läge'}
+                    >
+                      {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+                    </button>
+                  )}
+
+                  {/* Kalenderinställningar Cogwheel in top-right Nav */}
+                  {view === 'training' && (
+                    <button
+                      type="button"
+                      onClick={() => setOpenTrainingSettings(true)}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-205 dark:hover:bg-zinc-700 hover:text-indigo-650 dark:hover:text-indigo-400 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                      title="Kalenderinställningar"
+                    >
+                      <Settings size={20} />
+                    </button>
+                  )}
+
                   {isAuthReady && view !== 'exercise' && (
                     user ? (
                       <button
@@ -1698,25 +1847,6 @@ export default function App() {
                         <LogIn size={20} />
                       </button>
                     )
-                  )}
-                  {view === 'exercise' ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowTeamOverview(true)}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30"
-                      title="Visa lagöversikt"
-                    >
-                      <Users size={20} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={toggleTheme}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                      title={theme === 'light' ? 'Mörkt läge' : 'Ljust läge'}
-                    >
-                      {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-                    </button>
                   )}
                 </>
               )}
@@ -1839,6 +1969,15 @@ export default function App() {
                   onTabChange={setTrainingTab}
                   settings={trainingSettings}
                   onUpdateSettings={onUpdateSettings}
+                  openSettings={openTrainingSettings}
+                  onCloseSettings={() => setOpenTrainingSettings(false)}
+                  exerciseBank={exerciseBank}
+                  exerciseBankCategories={exerciseBankCategories}
+                  onAddBankCategory={addBankCategory}
+                  onRemoveBankCategory={removeBankCategory}
+                  onAddBankExercise={addBankExercise}
+                  onUpdateBankExercise={updateBankExercise}
+                  onRemoveBankExercise={removeBankExercise}
                   onSelectExercise={(id) => {
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setView('exercise');
@@ -2304,7 +2443,7 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="max-w-7xl mx-auto w-full h-full flex flex-col p-2 sm:p-4 overflow-hidden"
+                className="max-w-7xl mx-auto w-full h-full flex flex-col p-2 sm:p-4 overflow-hidden select-none"
               >
               {(() => {
                 const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
@@ -2371,7 +2510,7 @@ export default function App() {
                                 scale: 1.1,
                                 pointerEvents: 'none'
                               }}
-                              className="text-[10px] font-black text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded-md cursor-grab active:cursor-grabbing touch-none z-50 shadow-sm"
+                              className="text-[10px] font-black text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded-md cursor-grab active:cursor-grabbing touch-none z-50 shadow-sm select-none"
                             >
                               {player.name}
                             </motion.span>
@@ -2557,6 +2696,10 @@ export default function App() {
             onUpdate={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
             allSessions={sessions}
             onUpdateSession={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
+            exerciseBank={exerciseBank}
+            exerciseBankCategories={exerciseBankCategories}
+            onSaveToBank={saveMomentToBank}
+            onUpdateBankExercise={updateBankExercise}
             initialMode={sessionMode}
             onModeChange={setSessionMode}
             onMovePlayer={movePlayer}

@@ -142,88 +142,90 @@ export default function TeamPage({
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-zinc-100 dark:bg-zinc-900">
       {/* Browser-like Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 shadow-sm z-10">
-        <div className="flex items-center gap-1 sm:gap-2">
-          <button 
-            onClick={handleGoHome}
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
-            title="Hem"
-          >
-            <Home size={18} />
-          </button>
-          <button 
-            onClick={handleReset}
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
-            title="Uppdatera"
-          >
-            <RefreshCcw size={18} />
-          </button>
-        </div>
-
-        <div className="hidden sm:flex flex-1 max-w-lg mx-4">
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full border border-zinc-200 dark:border-zinc-800 overflow-hidden w-full">
-            <Globe size={12} className="text-zinc-400 shrink-0" />
-            <span className="text-[10px] font-bold text-zinc-500 truncate select-all">{url}</span>
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 shadow-sm z-10 w-full">
+        <div className="flex items-center justify-between px-4 py-2 max-w-4xl mx-auto w-full">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <button 
+              onClick={handleGoHome}
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
+              title="Hem"
+            >
+              <Home size={18} />
+            </button>
+            <button 
+              onClick={handleReset}
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
+              title="Uppdatera"
+            >
+              <RefreshCcw size={18} />
+            </button>
           </div>
-        </div>
 
-        {/* Mobile address indicator (just the icon) */}
-        {!isEditing && (
-          <div className="flex sm:hidden flex-1 justify-center">
-            <div className="flex items-center gap-2 px-3 py-1 bg-zinc-50 dark:bg-zinc-950 rounded-full border border-zinc-100 dark:border-zinc-800">
-              <Globe size={10} className="text-zinc-400" />
-              <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-tighter truncate max-w-[80px]">
-                {(() => {
-                  try {
-                    return (new URL(url).hostname).replace('www.', '');
-                  } catch (e) {
-                    return 'Webbsida';
-                  }
-                })()}
-              </span>
+          <div className="hidden sm:flex flex-1 max-w-lg mx-4">
+            <div className="flex items-center gap-2 px-4 py-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full border border-zinc-200 dark:border-zinc-800 overflow-hidden w-full">
+              <Globe size={12} className="text-zinc-400 shrink-0" />
+              <span className="text-[10px] font-bold text-zinc-500 truncate select-all">{url}</span>
             </div>
           </div>
-        )}
 
-        <div className="flex items-center gap-1 sm:gap-2">
-          {initialAdminUrl && (
-            <a 
-              href={initialAdminUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
-              title="Öppna Adminsida"
-            >
-              <ShieldCheck size={18} />
-            </a>
+          {/* Mobile address indicator (just the icon) */}
+          {!isEditing && (
+            <div className="flex sm:hidden flex-1 justify-center">
+              <div className="flex items-center gap-2 px-3 py-1 bg-zinc-50 dark:bg-zinc-950 rounded-full border border-zinc-100 dark:border-zinc-800">
+                <Globe size={10} className="text-zinc-400" />
+                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-tighter truncate max-w-[80px]">
+                  {(() => {
+                    try {
+                      return (new URL(url).hostname).replace('www.', '');
+                    } catch (e) {
+                      return 'Webbsida';
+                    }
+                  })()}
+                </span>
+              </div>
+            </div>
           )}
-          {initialSeriesUrl && (
-            <a 
-              href={initialSeriesUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
-              title="Öppna Serien/Tabellen"
+
+          <div className="flex items-center gap-1 sm:gap-2">
+            {initialAdminUrl && (
+              <a 
+                href={initialAdminUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
+                title="Öppna Adminsida"
+              >
+                <ShieldCheck size={18} />
+              </a>
+            )}
+            {initialSeriesUrl && (
+              <a 
+                href={initialSeriesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 hover:text-indigo-600 transition-colors"
+                title="Öppna Serien/Tabellen"
+              >
+                <Trophy size={18} />
+              </a>
+            )}
+            <button 
+              onClick={() => setIsEditing(true)}
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
+              title="Inställningar"
             >
-              <Trophy size={18} />
+              <Settings size={18} />
+            </button>
+            <a 
+              href={url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-indigo-600 transition-colors"
+              title="Öppna i ny flik"
+            >
+              <ExternalLink size={18} />
             </a>
-          )}
-          <button 
-            onClick={() => setIsEditing(true)}
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-zinc-500 transition-colors"
-            title="Inställningar"
-          >
-            <Settings size={18} />
-          </button>
-          <a 
-            href={url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-indigo-600 transition-colors"
-            title="Öppna i ny flik"
-          >
-            <ExternalLink size={18} />
-          </a>
+          </div>
         </div>
       </div>
 

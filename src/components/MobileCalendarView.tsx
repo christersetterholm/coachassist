@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Settings } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 
@@ -68,7 +68,11 @@ interface MobileCalendarViewProps {
   isSyncing?: boolean;
   onSync?: () => Promise<void>;
   hasSyncUrl: boolean;
-  onOpenSettings?: () => void;
+  onNewSession?: () => void;
+  onOpenTrash?: () => void;
+  onOpenSeriesCreator?: () => void;
+  deletedSessionsCount?: number;
+  onDeleteSession?: (id: string) => void;
 }
 
 export default function MobileCalendarView({
@@ -78,7 +82,11 @@ export default function MobileCalendarView({
   isSyncing = false,
   onSync,
   hasSyncUrl,
-  onOpenSettings
+  onNewSession,
+  onOpenTrash,
+  onOpenSeriesCreator,
+  deletedSessionsCount = 0,
+  onDeleteSession
 }: MobileCalendarViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'match' | 'training' | 'other'>('all');
@@ -117,6 +125,20 @@ export default function MobileCalendarView({
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [showPlanMenu, setShowPlanMenu] = useState(false);
+  const planMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (planMenuRef.current && !planMenuRef.current.contains(event.target as Node)) {
+        setShowPlanMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   const handlePrevMonth = () => {
     setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
@@ -301,18 +323,19 @@ export default function MobileCalendarView({
     <div className="w-full font-sans pb-12">
       {/* Sleek, Compact Unified Toolbar */}
       <div className="px-4 sm:px-0 mb-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-1.5 w-full">
           {/* Left section: Timeline Switcher / Month Navigation */}
           <div className="flex items-center gap-1.5 min-w-0">
             {viewMode === 'list' ? (
               /* Slim Timeline Segment list style */
               <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-xl border border-zinc-205 dark:border-zinc-800 text-[10px] font-bold">
                 <button
+                  type="button"
                   onClick={() => {
                     setShowPast(false);
                     setExpandedSessionId(null);
                   }}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     !showPast
                       ? 'bg-white dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-black'
                       : 'text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300'
@@ -321,11 +344,12 @@ export default function MobileCalendarView({
                   Kommande
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setShowPast(true);
                     setExpandedSessionId(null);
                   }}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     showPast
                       ? 'bg-white dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-black'
                       : 'text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300'
@@ -339,8 +363,9 @@ export default function MobileCalendarView({
               <div className="flex items-center gap-1.5">
                 <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-xl border border-zinc-150 dark:border-zinc-800 text-[10px] font-bold">
                   <button
+                    type="button"
                     onClick={handlePrevMonth}
-                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95"
+                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
                     title="Föregående månad"
                   >
                     <ChevronLeft size={14} strokeWidth={2.5} />
@@ -349,16 +374,18 @@ export default function MobileCalendarView({
                     {SWEDISH_MONTHS[currentMonth.getMonth()].substring(0, 3)} {currentMonth.getFullYear()}
                   </span>
                   <button
+                    type="button"
                     onClick={handleNextMonth}
-                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95"
+                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
                     title="Nästa månad"
                   >
                     <ChevronRight size={14} strokeWidth={2.5} />
                   </button>
                 </div>
                 <button
+                  type="button"
                   onClick={handleResetToToday}
-                  className="text-[9px] font-black uppercase px-2 py-1.5 bg-zinc-100 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-750 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl text-zinc-500 dark:text-zinc-300 transition-all"
+                  className="text-[9px] font-black uppercase px-2 py-1.5 bg-zinc-100 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-750 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl text-zinc-500 dark:text-zinc-300 transition-all cursor-pointer"
                 >
                   Idag
                 </button>
@@ -366,10 +393,68 @@ export default function MobileCalendarView({
             )}
           </div>
 
-          {/* Right section: Elegant Icon-button actions bar */}
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Right section: Elegant and Compact Action Buttons Bar */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Primary Action Button: Consolidated "+" Planning with dropdown */}
+            {(onNewSession || onOpenSeriesCreator) && (
+              <div className="relative" ref={planMenuRef}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPlanMenu(prev => !prev);
+                  }}
+                  className="w-8 h-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  title="Planera ny aktivitet (enstaka eller serie)"
+                >
+                  <Plus size={16} strokeWidth={2.5} />
+                </button>
+
+                <AnimatePresence>
+                  {showPlanMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                      className="absolute right-0 mt-1.5 w-56 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl shadow-xl z-50 py-1.5 overflow-hidden text-left"
+                    >
+                      {onNewSession && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowPlanMenu(false);
+                            onNewSession();
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <Plus size={14} className="text-zinc-400" />
+                          <span>Planera ny aktivitet</span>
+                        </button>
+                      )}
+                      {onOpenSeriesCreator && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowPlanMenu(false);
+                            onOpenSeriesCreator();
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-zinc-100 dark:border-zinc-800"
+                        >
+                          <Calendar size={13} className="text-zinc-400" />
+                          <span>Skapa serie träningspass</span>
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
             {/* Search Toggle Button */}
             <button
+              type="button"
               onClick={() => {
                 setIsSearchOpen(p => !p);
                 if (isSearchOpen) setSearchQuery('');
@@ -386,6 +471,7 @@ export default function MobileCalendarView({
 
             {/* View Mode Switcher (Grid/Month vs List) */}
             <button
+              type="button"
               onClick={() => {
                 setViewMode(prev => prev === 'month' ? 'list' : 'month');
                 setExpandedEventId(null);
@@ -412,29 +498,16 @@ export default function MobileCalendarView({
             {/* Sync trigger button if sync URL exists */}
             {onSync && hasSyncUrl && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onSync();
                 }}
                 disabled={isSyncing}
                 className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 transition-all cursor-pointer flex items-center justify-center shadow-sm disabled:opacity-50"
-                title="Hämta senaste händelserna från laget.se"
+                title="Hämta senaste händelserna från extern kalender"
               >
                 <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-              </button>
-            )}
-
-            {/* Settings Cogwheel */}
-            {onOpenSettings && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenSettings();
-                }}
-                className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 transition-all cursor-pointer flex items-center justify-center shadow-sm"
-                title="Kalenderinställningar"
-              >
-                <Settings size={14} />
               </button>
             )}
           </div>
@@ -465,6 +538,29 @@ export default function MobileCalendarView({
           )}
         </AnimatePresence>
       </div>
+
+      {/* Papperskorg warning banner */}
+      {onOpenTrash && deletedSessionsCount > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 mx-4 sm:mx-0 p-3.5 bg-amber-50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300 rounded-2xl text-[11px] font-semibold border border-amber-250/50 dark:border-amber-900/40 flex items-center justify-between gap-3 shadow-none"
+        >
+          <div className="flex items-center gap-2">
+            <Trash2 size={15} className="text-amber-505 shrink-0" />
+            <span className="leading-normal">
+              Du har <strong>{deletedSessionsCount}</strong> raderade träningspass i din papperskorg.
+            </span>
+          </div>
+          <button 
+            type="button"
+            onClick={onOpenTrash} 
+            className="bg-amber-600 hover:bg-amber-705 text-white font-black text-[9px] uppercase tracking-wider px-2.5 py-1.5 rounded-lg shrink-0 transition-all cursor-pointer"
+          >
+            Öppna papperskorgen
+          </button>
+        </motion.div>
+      )}
 
       {/* Filter Chips list */}
       <div className="flex gap-1.5 px-4 sm:px-0 overflow-x-auto pb-4 scrollbar-none">
@@ -685,8 +781,8 @@ export default function MobileCalendarView({
                             className="bg-zinc-50/50 dark:bg-zinc-900/30 border-t border-zinc-100 dark:border-zinc-800/70 overflow-hidden w-full"
                           >
                             <div className="p-4 text-xs font-medium space-y-4 text-left">
-                              {/* Action buttons (Öppna Planering) */}
-                              <div className="flex items-center justify-start pb-1">
+                              {/* Action buttons (Öppna Planering & Ta bort) */}
+                              <div className="flex items-center justify-between pb-1">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -697,6 +793,22 @@ export default function MobileCalendarView({
                                   <span>Öppna Planering</span>
                                   <ArrowRight size={11} strokeWidth={2.5} />
                                 </button>
+
+                                {onDeleteSession && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Är du säker på att du vill ta bort denna aktivitet och lägga den i papperskorgen?')) {
+                                        onDeleteSession(session.id);
+                                      }
+                                    }}
+                                    className="p-2.5 text-zinc-400 hover:text-rose-650 dark:hover:text-rose-450 hover:bg-rose-50 dark:hover:bg-rose-950/20 border border-zinc-200 dark:border-zinc-850 hover:border-rose-250 dark:hover:border-rose-900/30 rounded-xl transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                                    title="Ta bort aktivitet"
+                                  >
+                                    <Trash2 size={13} strokeWidth={2.5} />
+                                  </button>
+                                )}
                               </div>
 
                               <div 
@@ -1004,8 +1116,8 @@ export default function MobileCalendarView({
                             className="bg-zinc-50/60 dark:bg-zinc-950/25 border-t border-zinc-100 dark:border-zinc-805/70 overflow-hidden"
                           >
                             <div className="p-4 text-xs font-medium space-y-4">
-                              {/* Action buttons (Öppna Planering) */}
-                              <div className="flex items-center justify-start pb-1">
+                              {/* Action buttons (Öppna Planering & Ta bort) */}
+                              <div className="flex items-center justify-between pb-1">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1016,6 +1128,22 @@ export default function MobileCalendarView({
                                   <span>Öppna Planering</span>
                                   <ArrowRight size={11} strokeWidth={2.5} />
                                 </button>
+
+                                {onDeleteSession && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Är du säker på att du vill ta bort denna aktivitet och lägga den i papperskorgen?')) {
+                                        onDeleteSession(session.id);
+                                      }
+                                    }}
+                                    className="p-2.5 text-zinc-400 hover:text-rose-650 dark:hover:text-rose-450 hover:bg-rose-50 dark:hover:bg-rose-950/20 border border-zinc-200 dark:border-zinc-850 hover:border-rose-250 dark:hover:border-rose-900/30 rounded-xl transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                                    title="Ta bort aktivitet"
+                                  >
+                                    <Trash2 size={13} strokeWidth={2.5} />
+                                  </button>
+                                )}
                               </div>
 
                               {/* Attendance snapshot */}

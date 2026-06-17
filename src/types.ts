@@ -118,6 +118,7 @@ export interface SessionMoment {
   duration: number; // in minutes
   description?: string;
   exerciseId?: string; // Link to a standalone exercise if applicable
+  bankExerciseId?: string; // Link to a bank exercise if applicable
   imageUrl?: string;
   imageUrls?: string[];
   externalLink?: string;
@@ -146,6 +147,8 @@ export interface CoachData {
   customFormations?: FormationVariant[];
   pinnedFormationIds?: string[];
   trainingSettings?: TrainingSettings;
+  exerciseBank?: BankExercise[];
+  exerciseBankCategories?: string[];
 }
 
 export interface TrainingSession {
@@ -278,3 +281,17 @@ export const VEST_COLORS = [
   '#F97316', // Orange
   '#71717A', // Zinc
 ];
+
+export interface BankExercise {
+  id: string;
+  name: string;
+  duration: number; // default duration in minutes
+  description?: string;
+  category?: string; // e.g. 'Uppvärmning', 'Teknik', 'Spel', 'Fys', 'Annat'
+  categories?: string[]; // Multiple categories / labels
+  imageUrl?: string;
+  imageUrls?: string[];
+  externalLink?: string;
+  createdAt: number;
+}
+
