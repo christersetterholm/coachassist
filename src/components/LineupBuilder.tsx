@@ -5,7 +5,7 @@ import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, ZoomIn, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -62,6 +62,23 @@ function getCircumcircle(p1: DelaunayPoint, p2: DelaunayPoint, p3: DelaunayPoint
   const uy = ((p1Sq * (p3.x - p2.x)) + (p2Sq * (p1.x - p3.x)) + (p3Sq * (p2.x - p1.x))) / d;
   const rSq = (p1.x - ux) * (p1.x - ux) + (p1.y - uy) * (p1.y - uy);
   return { x: ux, y: uy, rSq };
+}
+
+function getDistanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 && dy === 0) {
+    const rx = px - ax;
+    const ry = py - ay;
+    return Math.sqrt(rx * rx + ry * ry);
+  }
+  const t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+  const clampedT = Math.max(0, Math.min(1, t));
+  const closestX = ax + clampedT * dx;
+  const closestY = ay + clampedT * dy;
+  const rx = px - closestX;
+  const ry = py - closestY;
+  return Math.sqrt(rx * rx + ry * ry);
 }
 
 function getDelaunayTriangulation(points: DelaunayPoint[]): DelaunayEdge[] {
@@ -405,6 +422,7 @@ export default function LineupBuilder({
   const [isControlsVisible, setIsControlsVisible] = useState(false);
   const [isDrawingsVisible, setIsDrawingsVisible] = useState(false);
   const [showDelaunayNetwork, setShowDelaunayNetwork] = useState(false);
+  const [passingNetworkMode, setPassingNetworkMode] = useState<'triangulation' | 'standard' | 'maximum' | 'ultra' | 'lanes'>('standard');
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
@@ -2825,7 +2843,77 @@ export default function LineupBuilder({
                   return { x: displayX, y: displayY, id: p.id };
                 });
                 
-                const edges = getDelaunayTriangulation(pointsList);
+                const edges: { p1: number; p2: number }[] = [];
+                const edgeKeySet = new Set<string>();
+
+                const addEdge = (u: number, v: number) => {
+                  const min = Math.min(u, v);
+                  const max = Math.max(u, v);
+                  const key = `${min}-${max}`;
+                  if (!edgeKeySet.has(key)) {
+                    edgeKeySet.add(key);
+                    edges.push({ p1: min, p2: max });
+                  }
+                };
+
+                // 1. Calculate Delaunay edges
+                const delaunayEdges = getDelaunayTriangulation(pointsList);
+                for (const edge of delaunayEdges) {
+                  addEdge(edge.p1, edge.p2);
+                }
+
+                // 2. If standard, maximum, ultra or lanes, enrich/increase connections by connecting nearest neighbors or unblocked lines
+                if (passingNetworkMode !== 'triangulation') {
+                  if (passingNetworkMode === 'lanes') {
+                    for (let i = 0; i < pointsList.length; i++) {
+                      for (let j = i + 1; j < pointsList.length; j++) {
+                        const pi = pointsList[i];
+                        const pj = pointsList[j];
+                        const dx = pi.x - pj.x;
+                        const dy = pi.y - pj.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance <= 65) {
+                          let blocked = false;
+                          for (let k = 0; k < pointsList.length; k++) {
+                            if (k === i || k === j) continue;
+                            const pk = pointsList[k];
+                            const distToSeg = getDistanceToSegment(pk.x, pk.y, pi.x, pi.y, pj.x, pj.y);
+                            if (distToSeg < 7.2) {
+                              blocked = true;
+                              break;
+                            }
+                          }
+                          if (!blocked) {
+                            addEdge(i, j);
+                          }
+                        }
+                      }
+                    }
+                  } else {
+                    const k = passingNetworkMode === 'ultra' ? 5 : passingNetworkMode === 'maximum' ? 4 : 3;
+                    for (let i = 0; i < pointsList.length; i++) {
+                      const pi = pointsList[i];
+                      const distances = pointsList
+                        .map((pj, j) => {
+                          if (i === j) return { index: j, dist: Infinity };
+                          const dx = pi.x - pj.x;
+                          const dy = pi.y - pj.y;
+                          return { index: j, dist: dx * dx + dy * dy };
+                        })
+                        .sort((a, b) => a.dist - b.dist);
+
+                      // Add connections to the closest k teammates
+                      for (let nIdx = 0; nIdx < Math.min(k, distances.length); nIdx++) {
+                        const neighbor = distances[nIdx];
+                        if (neighbor && neighbor.dist !== Infinity) {
+                          addEdge(i, neighbor.index);
+                        }
+                      }
+                    }
+                  }
+                }
+
                 return (
                   <g className="pointer-events-none z-10">
                     {edges.map((edge, idx) => {
@@ -2840,9 +2928,9 @@ export default function LineupBuilder({
                           x2={p2.x}
                           y2={p2.y}
                           stroke="#6366f1"
-                          strokeWidth="0.45"
-                          strokeOpacity={0.7}
-                          strokeDasharray="1.5, 1"
+                          strokeWidth="0.55"
+                          strokeOpacity={0.75}
+                          strokeDasharray="2, 1.5"
                           className="animate-pulse"
                           style={{
                             animationDuration: '2.5s'
@@ -3430,9 +3518,9 @@ export default function LineupBuilder({
                     ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
                     : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
                 }`}
-                title={showZoomMenu ? "Dölj zoominställningar" : "Visa zoominställningar"}
+                title={showZoomMenu ? "Dölj inställningar & zoom" : "Visa inställningar & zoom"}
               >
-                <ZoomIn size={16} />
+                <Settings size={16} />
               </button>
               <button
                 onClick={() => {
@@ -3519,10 +3607,10 @@ export default function LineupBuilder({
                 initial={{ opacity: 0, y: -10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                className="fixed top-14 right-3 z-[155] w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3.5 flex flex-col gap-3 pointer-events-auto font-sans"
+                className="fixed top-14 right-3 z-[155] w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3.5 flex flex-col gap-3 pointer-events-auto font-sans"
               >
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
-                  <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Zoominställningar</span>
+                  <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Inställningar & Zoom</span>
                   <button 
                     onClick={() => setShowZoomMenu(false)}
                     className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors p-0.5 rounded"
@@ -3604,6 +3692,84 @@ export default function LineupBuilder({
                       </button>
                     </div>
                   </div>
+
+                  {/* Passningsnätverk settings */}
+                  <div className="flex flex-col gap-1.5 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Passningsnätverk (Kopplingar)</span>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-50 dark:bg-black/20 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                      <button
+                        onClick={() => {
+                          setPassingNetworkMode('triangulation');
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
+                          passingNetworkMode === 'triangulation'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                        }`}
+                        title="Enbart Delaunay-triangulering"
+                      >
+                        Trianglar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPassingNetworkMode('standard');
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
+                          passingNetworkMode === 'standard'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                        }`}
+                        title="Standard (trianglar + 3 närmaste)"
+                      >
+                        Standard (3)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPassingNetworkMode('maximum');
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
+                          passingNetworkMode === 'maximum'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                        }`}
+                        title="Maximal (trianglar + 4 närmaste)"
+                      >
+                        Maximal (4)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPassingNetworkMode('ultra');
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
+                          passingNetworkMode === 'ultra'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                        }`}
+                        title="Ultimat (trianglar + 5 närmaste)"
+                      >
+                        Ultimat (5)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPassingNetworkMode('lanes');
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`col-span-2 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
+                          passingNetworkMode === 'lanes'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                        }`}
+                        title="Öppna Spelvägar (Korsande linjer tillåtna för alla fria passningskanaler)"
+                      >
+                        Öppna Spelvägar (Fritt)
+                      </button>
+                    </div>
+                  </div>
+
                 </div>
               </motion.div>
             )}
@@ -4655,7 +4821,7 @@ export default function LineupBuilder({
 
                       <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
                         <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Anfallsriktning</span>
-                        <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                           {orientation === 'vertical' ? (
                             <>
                               <button onClick={() => {
@@ -4677,6 +4843,84 @@ export default function LineupBuilder({
                           )}
                         </div>
                       </div>
+
+                      {/* Automated Pass network setting */}
+                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Automatiskt Passningsnätverk</span>
+                        <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                          <button
+                            onClick={() => {
+                              setPassingNetworkMode('triangulation');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
+                              passingNetworkMode === 'triangulation'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>Triangulering</span>
+                            <span className="text-[8px] opacity-75 font-medium lowercase">enbart trianglar</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPassingNetworkMode('standard');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
+                              passingNetworkMode === 'standard'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-zinc-450 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>Standard (3)</span>
+                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 3 närmaste</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPassingNetworkMode('maximum');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
+                              passingNetworkMode === 'maximum'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-zinc-450 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>Maximalt (4)</span>
+                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 4 närmaste</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPassingNetworkMode('ultra');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
+                              passingNetworkMode === 'ultra'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-zinc-450 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>Ultimat (5)</span>
+                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 5 närmaste</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPassingNetworkMode('lanes');
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center col-span-2 xs:col-span-1 sm:col-span-1 ${
+                              passingNetworkMode === 'lanes'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-zinc-450 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>Spelvägar</span>
+                            <span className="text-[8px] opacity-75 font-medium lowercase">fria passningskanaler</span>
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
                   </div>
 
