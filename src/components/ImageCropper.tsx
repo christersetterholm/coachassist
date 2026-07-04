@@ -43,11 +43,12 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
     rotation = 0
   ): Promise<Blob> => {
     const image = await createImage(imageSrc);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) {
-      throw new Error('No 2d context');
+    
+    // Create an off-screen canvas to hold the rotated/unrotated image
+    const sourceCanvas = document.createElement('canvas');
+    const sourceCtx = sourceCanvas.getContext('2d');
+    if (!sourceCtx) {
+      throw new Error('No 2d context for sourceCanvas');
     }
 
     const rotRad = (rotation * Math.PI) / 180;
@@ -57,25 +58,45 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
       rotation
     );
 
-    canvas.width = bBoxWidth;
-    canvas.height = bBoxHeight;
+    sourceCanvas.width = bBoxWidth;
+    sourceCanvas.height = bBoxHeight;
 
-    ctx.translate(bBoxWidth / 2, bBoxHeight / 2);
-    ctx.rotate(rotRad);
-    ctx.translate(-image.width / 2, -image.height / 2);
+    // Use high rendering options
+    sourceCtx.imageSmoothingEnabled = true;
+    sourceCtx.imageSmoothingQuality = 'high';
 
-    ctx.drawImage(image, 0, 0);
+    sourceCtx.translate(bBoxWidth / 2, bBoxHeight / 2);
+    sourceCtx.rotate(rotRad);
+    sourceCtx.translate(-image.width / 2, -image.height / 2);
+    sourceCtx.drawImage(image, 0, 0);
 
-    const maxSize = 400;
-    let targetWidth = pixelCrop.width;
-    let targetHeight = pixelCrop.height;
+    // Create target canvas to draw the cropped sub-region
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      throw new Error('No 2d context for target canvas');
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Round values to prevent floating-point sub-pixel aliasing (creates thin gray lines)
+    const cropX = Math.round(pixelCrop.x);
+    const cropY = Math.round(pixelCrop.y);
+    const cropWidth = Math.round(pixelCrop.width);
+    const cropHeight = Math.round(pixelCrop.height);
+
+    const maxSize = 512; // Enforce high quality resolution for team logos & profile pictures
+    let targetWidth = cropWidth;
+    let targetHeight = cropHeight;
 
     if (targetWidth > maxSize || targetHeight > maxSize) {
       if (targetWidth > targetHeight) {
-        targetHeight = (maxSize / targetWidth) * targetHeight;
+        targetHeight = Math.round((maxSize / targetWidth) * targetHeight);
         targetWidth = maxSize;
       } else {
-        targetWidth = (maxSize / targetHeight) * targetWidth;
+        targetWidth = Math.round((maxSize / targetHeight) * targetWidth);
         targetHeight = maxSize;
       }
     }
@@ -83,22 +104,18 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
     canvas.width = targetWidth;
     canvas.height = targetHeight;
 
-    ctx.drawImage(
-      image,
-      pixelCrop.x,
-      pixelCrop.y,
-      pixelCrop.width,
-      pixelCrop.height,
-      0,
-      0,
-      targetWidth,
-      targetHeight
-    );
+    const scaleX = targetWidth / Math.max(1, cropWidth);
+    const scaleY = targetHeight / Math.max(1, cropHeight);
+
+    ctx.scale(scaleX, scaleY);
+    // Draw the rotated source canvas at the rounded negative coordinate offsets
+    ctx.drawImage(sourceCanvas, -cropX, -cropY);
 
     return new Promise((resolve) => {
-      const isPng = imageSrc.startsWith('data:image/png');
+      // Prefer lossless PNG to support transparent backgrounds (essential for logo overlays)
+      const isPng = imageSrc.startsWith('data:image/png') || imageSrc.toLowerCase().includes('.png') || imageSrc.toLowerCase().includes('.svg') || !imageSrc.startsWith('data:');
       const mimeType = isPng ? 'image/png' : 'image/jpeg';
-      const quality = 0.8;
+      const quality = 0.95;
 
       canvas.toBlob((file) => {
         if (file) resolve(file);
@@ -139,6 +156,8 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
           zoom={zoom}
           rotation={rotation}
           aspect={aspect}
+          minZoom={0.2}
+          restrictPosition={false}
           onCropChange={onCropChange}
           onCropComplete={onCropCompleteInternal}
           onZoomChange={onZoomChange}
@@ -148,18 +167,18 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
       <div className="w-full max-w-2xl mt-6 space-y-6">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4 text-white">
-            <ZoomOut size={20} className="text-zinc-500" />
+            <ZoomOut size={20} className="text-zinc-500" onClick={() => setZoom(Math.max(0.2, zoom - 0.1))} />
             <input
               type="range"
               value={zoom}
-              min={1}
+              min={0.2}
               max={3}
-              step={0.1}
+              step={0.05}
               aria-labelledby="Zoom"
               onChange={(e) => setZoom(Number(e.target.value))}
               className="flex-1 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
             />
-            <ZoomIn size={20} className="text-zinc-500" />
+            <ZoomIn size={20} className="text-zinc-500" onClick={() => setZoom(Math.min(3, zoom + 0.1))} />
           </div>
 
           <div className="flex items-center gap-4 text-white">

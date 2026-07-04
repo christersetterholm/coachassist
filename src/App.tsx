@@ -139,24 +139,59 @@ export default function App() {
     return 'training';
   });
 
-  const setView = (newView: View | ((prev: View) => View)) => {
-    // Aggressively blur any active elements (especially inputs / textareas) 
-    // BEFORE they get unmounted to completely prevent iOS "Undo/Shake to Undo" 
-    // ghost states.
+  const clearBrowserUndoHistory = () => {
+    // 1. Aggressively blur any active elements (especially inputs / textareas) 
+    // BEFORE they get unmounted to completely prevent iOS "Undo/Shake to Undo" ghost states.
     try {
       const activeEl = document.activeElement as HTMLElement;
       if (activeEl && typeof activeEl.blur === 'function') {
         activeEl.blur();
       }
     } catch (e) {
-      console.error("Error blurring on setView:", e);
+      console.error("Error blurring:", e);
     }
-    
+
     try {
-      window.focus();
+      // 2. Disable, make read-only, and set type to 'hidden' to force Safari WebKit's input responder chain to drop them.
+      const inputs = document.querySelectorAll('input, textarea');
+      inputs.forEach((el: any) => {
+        try {
+          el.blur();
+          el.disabled = true;
+          el.readOnly = true;
+          if (el.tagName === 'INPUT') {
+            el.setAttribute('type', 'hidden');
+          }
+        } catch (err) {}
+      });
+    } catch (e) {
+      console.error("Error cleaning up inputs:", e);
+    }
+
+    // 3. Clear any active selection ranges to prevent iOS selection shake-to-undo
+    try {
+      window.getSelection()?.removeAllRanges();
     } catch (e) {}
 
-    _setView(newView);
+    // 4. Synchronously toggle document.designMode 'on' and then immediately 'off'.
+    // This is a highly effective, silent WebKit/Blink workaround that programmatically
+    // forces Safari to discard its native document-level UndoManager stack completely.
+    try {
+      document.designMode = 'on';
+      document.designMode = 'off';
+    } catch (e) {
+      console.error("Error toggling designMode:", e);
+    }
+  };
+
+  const setView = (newView: View | ((prev: View) => View)) => {
+    clearBrowserUndoHistory();
+    // Delay the actual state update slightly (120ms) to allow Safari's input responder chain,
+    // active event loop, and UndoManager to process the blurs, disabling, and designMode
+    // toggle BEFORE the inputs are fully unmounted from the DOM.
+    setTimeout(() => {
+      _setView(newView);
+    }, 120);
   };
   const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view'>('calendar_view');
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
@@ -188,7 +223,7 @@ export default function App() {
   const notifiedMomentsRef = useRef<Set<string>>(new Set());
   const lastSharedLeaderboardsRef = useRef<Record<string, string>>({});
 
-  // Notification Scheduler for Training Moments
+  // Notification Scheduler for Training Moments & iOS Shake to Undo Protection
   useEffect(() => {
     // Prevent iOS "Shake to Undo" dialog
     const handleUndo = (e: any) => {
@@ -196,6 +231,94 @@ export default function App() {
       if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
         e.preventDefault();
         e.stopPropagation();
+        return;
+      }
+
+      // Check if we are on iOS to bypass the native text editing UndoManager
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                    (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
+
+      if (isIOS) {
+        const target = e.target;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+          const type = target.type || 'text';
+          const isTextInput = ['text', 'search', 'url', 'tel', 'email', 'password'].includes(type) || target.tagName === 'TEXTAREA';
+          if (!isTextInput) return;
+
+          // List of input types we handle manually to bypass native WebKit UndoManager insertion
+          const handledInputTypes = [
+            'insertText',
+            'insertFromPaste',
+            'deleteContentBackward',
+            'deleteContentForward'
+          ];
+
+          if (handledInputTypes.includes(e.inputType)) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? 0;
+            const value = target.value;
+            let newValue = value;
+            let newSelectionStart = start;
+            let newSelectionEnd = start;
+
+            if (e.inputType === 'insertText') {
+              const textToInsert = e.data || '';
+              newValue = value.slice(0, start) + textToInsert + value.slice(end);
+              newSelectionStart = start + textToInsert.length;
+              newSelectionEnd = newSelectionStart;
+            } else if (e.inputType === 'insertFromPaste') {
+              const textToInsert = e.dataTransfer?.getData('text') || '';
+              newValue = value.slice(0, start) + textToInsert + value.slice(end);
+              newSelectionStart = start + textToInsert.length;
+              newSelectionEnd = newSelectionStart;
+            } else if (e.inputType === 'deleteContentBackward') {
+              if (start === end) {
+                if (start > 0) {
+                  newValue = value.slice(0, start - 1) + value.slice(end);
+                  newSelectionStart = start - 1;
+                  newSelectionEnd = start - 1;
+                }
+              } else {
+                newValue = value.slice(0, start) + value.slice(end);
+                newSelectionStart = start;
+                newSelectionEnd = start;
+              }
+            } else if (e.inputType === 'deleteContentForward') {
+              if (start === end) {
+                if (start < value.length) {
+                  newValue = value.slice(0, start) + value.slice(start + 1);
+                  newSelectionStart = start;
+                  newSelectionEnd = start;
+                }
+              } else {
+                newValue = value.slice(0, start) + value.slice(end);
+                newSelectionStart = start;
+                newSelectionEnd = start;
+              }
+            }
+
+            // Programmatically update native property value to trigger React's synthetic input/change flow
+            const prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+            const nativeValueSetter = descriptor?.set;
+            
+            if (nativeValueSetter) {
+              nativeValueSetter.call(target, newValue);
+              const event = new Event('input', { bubbles: true, cancelable: true });
+              target.dispatchEvent(event);
+            } else {
+              target.value = newValue;
+            }
+
+            // Restore selection range/cursor position
+            try {
+              target.setSelectionRange(newSelectionStart, newSelectionEnd);
+            } catch (err) {}
+          }
+        }
       }
     };
 
@@ -204,27 +327,71 @@ export default function App() {
       e.stopPropagation();
     };
 
-    // Also, clear focus when entering exercise mode to avoid triggering the system undo manager
-    if (view === 'exercise') {
-      const activeElement = document.activeElement as HTMLElement;
-      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-        activeElement.blur();
+    // Clean up inputs on state changes to prevent unmounting inputs from leaving trailing undo histories
+    clearBrowserUndoHistory();
+
+    // Focus cleanup on first interaction
+    let cleanedUpInteraction = false;
+    const handleFirstInteraction = () => {
+      if (!cleanedUpInteraction) {
+        cleanedUpInteraction = true;
+        try {
+          const activeEl = document.activeElement as HTMLElement;
+          if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+            activeEl.blur();
+          }
+        } catch (e) {}
+        window.removeEventListener('touchstart', handleFirstInteraction, { capture: true });
+        window.removeEventListener('mousedown', handleFirstInteraction, { capture: true });
       }
-      // Force focus to non-editable body
-      window.focus();
+    };
+
+    // Extra selection-suppressing event listeners during live exercise views
+    const clearSelection = () => {
+      try {
+        window.getSelection()?.removeAllRanges();
+      } catch (e) {}
+    };
+
+    if (view === 'exercise') {
+      try {
+        const activeEl = document.activeElement as HTMLElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+          activeEl.blur();
+        }
+      } catch (e) {}
+
+      window.addEventListener('touchstart', handleFirstInteraction, { capture: true, passive: true });
+      window.addEventListener('mousedown', handleFirstInteraction, { capture: true, passive: true });
+
+      // Aggressively clear selection range on any touches/taps to prevent iOS from keeping selection undo actions
+      window.addEventListener('touchend', clearSelection, { passive: true });
+      window.addEventListener('touchcancel', clearSelection, { passive: true });
+      window.addEventListener('mouseup', clearSelection, { passive: true });
+      document.addEventListener('selectionchange', clearSelection, { passive: true });
     }
 
-    // Capture phase is important here
+    // Capture phase listeners for undo/redo
     window.addEventListener('beforeinput', handleUndo, true);
     document.addEventListener('undo', preventDefault, true);
     document.addEventListener('redo', preventDefault, true);
 
     return () => {
+      // Clear inputs and flush native UndoManager stack again upon unmounting or state transition
+      clearBrowserUndoHistory();
+
       window.removeEventListener('beforeinput', handleUndo, true);
       document.removeEventListener('undo', preventDefault, true);
       document.removeEventListener('redo', preventDefault, true);
+      window.removeEventListener('touchstart', handleFirstInteraction, { capture: true });
+      window.removeEventListener('mousedown', handleFirstInteraction, { capture: true });
+      
+      window.removeEventListener('touchend', clearSelection);
+      window.removeEventListener('touchcancel', clearSelection);
+      window.removeEventListener('mouseup', clearSelection);
+      document.removeEventListener('selectionchange', clearSelection);
     };
-  }, [view]);
+  }, [view, showTeamOverview, openTrainingSettings, activeSessionId]);
 
   useEffect(() => {
     const checkNotifications = () => {
@@ -615,16 +782,58 @@ export default function App() {
     }
   }, [user?.uid, isAuthReady]);
 
-  // Push Local Actions to Cloud
+  // Push Local Actions to Cloud with dynamic debounce based on prioritized domains
   useEffect(() => {
+    if (activeExerciseId !== null) {
+      // Skip automatic cloud synchronization while actively in a competition/exercise view.
+      // Accumulated changes will be synced as a single transaction when leaving or finishing the competition.
+      return;
+    }
+
     if (user && isAuthReady && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
       // Security: verify current data actually belongs to this user
       if (syncUserIdRef.current !== user.uid) return;
       
+      const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories };
+      const lastSynced = lastCloudDataRef.current;
+      
+      let debounceDelay = 5000; // Default backup is 5 seconds
+      
+      if (lastSynced) {
+        // 1. Lineups & Squad Changes (Laguppställning & Trupp): High/Medium Priority (5 seconds)
+        const lineupChanged = 
+          JSON.stringify(lastSynced.lineups) !== JSON.stringify(lineups) ||
+          JSON.stringify(lastSynced.squad) !== JSON.stringify(squad) ||
+          lastSynced.activeLineupId !== activeLineupId ||
+          JSON.stringify(lastSynced.customFormations) !== JSON.stringify(customFormations) ||
+          JSON.stringify(lastSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds);
+
+        // 2. Training Planning Changes (Träningsplanering): Medium Priority (30 seconds)
+        const trainingChanged = 
+          JSON.stringify(lastSynced.sessions) !== JSON.stringify(sessions) ||
+          JSON.stringify(lastSynced.trainingSettings) !== JSON.stringify(trainingSettings) ||
+          JSON.stringify(lastSynced.exerciseBank) !== JSON.stringify(exerciseBank) ||
+          JSON.stringify(lastSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
+
+        // 3. Competition Results Changes (Tävlingsresultat): Medium Priority (5 seconds when leaving/completing)
+        const competitionChanged = 
+          JSON.stringify(lastSynced.exercises) !== JSON.stringify(exercises) ||
+          lastSynced.activeExerciseId !== activeExerciseId ||
+          JSON.stringify(lastSynced.periods) !== JSON.stringify(periods) ||
+          lastSynced.currentPeriodId !== currentPeriodId;
+
+        if (lineupChanged) {
+          debounceDelay = 5000; // 5 seconds debounce as requested by the user
+        } else if (trainingChanged) {
+          debounceDelay = 30000; // Slower 30s debounce to save writes during text editing/planning
+        } else if (competitionChanged) {
+          debounceDelay = 5000; // Sync in 5 seconds when exiting or completing the competition
+        }
+      }
+      
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid || isSyncing) return;
         
-        const currentState = { squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories };
         const capturedActionCount = sessionActionCount;
         
         // Skip if current state matches what we last saw from cloud
@@ -636,7 +845,7 @@ export default function App() {
           }
         }
         
-        console.log("App: Syncing local actions (" + sessionActionCount + ") to cloud...");
+        console.log(`App: Syncing local actions (${sessionActionCount}) to cloud. Debounce used: ${debounceDelay}ms`);
         setIsSyncing(true);
         const now = Date.now();
         try {
@@ -664,13 +873,17 @@ export default function App() {
         }
       };
       
-      const timeout = setTimeout(syncData, 5000); // 5000ms debounce delay to group rapid changes and save Firestore quota
+      const timeout = setTimeout(syncData, debounceDelay);
       return () => clearTimeout(timeout);
     }
   }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded]);
 
-  // Sync shared leaderboards globally
+  // Sync shared leaderboards globally with optimized, less aggressive debouncing
   useEffect(() => {
+    if (activeExerciseId !== null) {
+      // Skip publishing/sharing leaderboard updates while actively in a competition/exercise view.
+      return;
+    }
     if (user && isAuthReady && isInitialSyncDone && !isQuotaExceeded) {
       const syncSharedLeaderboards = async () => {
         const sharedPeriods = periods.filter(p => p.shareId);
@@ -720,10 +933,23 @@ export default function App() {
         }
       };
 
-      const timeoutId = setTimeout(syncSharedLeaderboards, 3000);
+      let debounceDelay = 45000; // Default 45s low-frequency debounce during general score updates
+      const lastSynced = lastCloudDataRef.current;
+      if (lastSynced) {
+        // If an exercise was recently finished compared to the cloud state, publish the leaderboard final results in 5 seconds
+        const hasFinishedChange = exercises.some(e => {
+          const cloudEx = lastSynced.exercises.find((cx: any) => cx.id === e.id);
+          return e.isFinished && (!cloudEx || !cloudEx.isFinished);
+        });
+        if (hasFinishedChange) {
+          debounceDelay = 5000;
+        }
+      }
+
+      const timeoutId = setTimeout(syncSharedLeaderboards, debounceDelay);
       return () => clearTimeout(timeoutId);
     }
-  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone, isQuotaExceeded]);
+  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone, isQuotaExceeded, activeExerciseId]);
 
   // Update localStorage for guests
   useEffect(() => {
@@ -1151,7 +1377,8 @@ export default function App() {
       externalLink: moment.externalLink,
       category: 'Annat',
       categories: ['Annat'],
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      tacticalBoards: moment.tacticalBoards
     };
     setData(prev => ({
       ...prev,
@@ -2705,6 +2932,7 @@ export default function App() {
             onMovePlayer={movePlayer}
             onCopyTeams={copyTeams}
             initialTab={sessionEditorTab}
+            adminUrl={adminUrl}
             onClose={() => {
               setActiveSessionId(null);
               setLinkToMomentId(null);

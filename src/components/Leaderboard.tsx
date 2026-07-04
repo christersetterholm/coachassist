@@ -112,7 +112,7 @@ export default function Leaderboard({
         }
       };
       
-      const timeoutId = setTimeout(syncShared, 2000); // Debounce
+      const timeoutId = setTimeout(syncShared, 30000); // Debounce increased to 30 seconds to prevent rapid write spam while viewing leaderboards
       return () => clearTimeout(timeoutId);
     }
   }, [squad, exercises, selectedPeriodId, periods, sharedId, userUid]);
@@ -548,8 +548,8 @@ export default function Leaderboard({
                   >
                     <div className="bg-zinc-50 dark:bg-zinc-950/50 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800">
                       <div className="flex flex-wrap gap-x-6 gap-y-3">
-                        {player.history.map((h) => (
-                            <div className="flex items-center group relative overflow-hidden">
+                        {player.history.map((h, hIdx) => (
+                            <div key={`${hIdx}-${h.date}-${h.exerciseName}`} className="flex items-center group relative overflow-hidden">
                               <div className="flex flex-col gap-0.5">
                                 <span className="text-[10px] font-bold text-zinc-400 uppercase">
                                   {new Date(h.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}

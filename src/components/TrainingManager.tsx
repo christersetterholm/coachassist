@@ -1040,6 +1040,7 @@ export default function TrainingManager({
           onRemoveBankExercise={onRemoveBankExercise}
           sessions={sessions}
           onUpdateSession={onUpdateSession}
+          squad={squad}
         />
       ) : activeTab === 'calendar_view' ? (
         <MobileCalendarView

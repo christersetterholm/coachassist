@@ -1,9 +1,10 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Search, Plus, Trash2, Edit2, Library, Clock, ExternalLink, Upload, Loader2, Save, X, FolderHeart, Check, Calendar, ChevronRight } from 'lucide-react';
+import { Search, Plus, Trash2, Edit2, Library, Clock, ExternalLink, Upload, Loader2, Save, X, FolderHeart, Check, Calendar, ChevronRight, Image as ImageIcon, ChevronDown, ChevronUp, Layout } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
-import { BankExercise, TrainingSession } from '../types';
+import { BankExercise, TrainingSession, SquadPlayer } from '../types';
+import TacticalBoardModal from './TacticalBoardModal';
 
 interface ExerciseBankViewProps {
   exerciseBank?: BankExercise[];
@@ -15,6 +16,7 @@ interface ExerciseBankViewProps {
   onRemoveBankExercise?: (id: string) => void;
   sessions?: TrainingSession[];
   onUpdateSession?: (updated: TrainingSession) => void;
+  squad?: SquadPlayer[];
 }
 
 const DEFAULT_CATEGORIES = [
@@ -43,6 +45,12 @@ const getExerciseCategories = (ex: BankExercise): string[] => {
   return [];
 };
 
+const getExerciseImages = (ex: BankExercise): string[] => {
+  if (ex.imageUrls && ex.imageUrls.length > 0) return ex.imageUrls;
+  if (ex.imageUrl) return [ex.imageUrl];
+  return [];
+};
+
 export default function ExerciseBankView({
   exerciseBank = [],
   exerciseBankCategories = [],
@@ -52,7 +60,8 @@ export default function ExerciseBankView({
   onUpdateBankExercise,
   onRemoveBankExercise,
   sessions = [],
-  onUpdateSession
+  onUpdateSession,
+  squad = []
 }: ExerciseBankViewProps) {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Alla');
@@ -106,7 +115,7 @@ export default function ExerciseBankView({
       duration: ex.duration || 15,
       description: ex.description,
       imageUrl: ex.imageUrl,
-      imageUrls: ex.imageUrl ? [ex.imageUrl] : undefined,
+      imageUrls: ex.imageUrls || (ex.imageUrl ? [ex.imageUrl] : undefined),
       externalLink: ex.externalLink,
       bankExerciseId: ex.id,
     }));
@@ -164,6 +173,9 @@ export default function ExerciseBankView({
     });
   };
   
+  // Image display lightbox state
+  const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
+
   // Form fields
   const [formName, setFormName] = useState('');
   const [formDuration, setFormDuration] = useState(15);
@@ -171,6 +183,10 @@ export default function ExerciseBankView({
   const [formCategories, setFormCategories] = useState<string[]>(['Teknik']);
   const [formExternalLink, setFormExternalLink] = useState('');
   const [formImageUrl, setFormImageUrl] = useState('');
+  const [formImageUrls, setFormImageUrls] = useState<string[]>([]);
+  const [formTacticalBoards, setFormTacticalBoards] = useState<any[]>([]);
+  const [isFormTacticalBoardOpen, setIsFormTacticalBoardOpen] = useState(false);
+  const [tacticalBoardExercise, setTacticalBoardExercise] = useState<BankExercise | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -186,6 +202,8 @@ export default function ExerciseBankView({
     setFormCategories(['Teknik']);
     setFormExternalLink('');
     setFormImageUrl('');
+    setFormImageUrls([]);
+    setFormTacticalBoards([]);
     setEditingExercise(null);
   };
 
@@ -199,6 +217,7 @@ export default function ExerciseBankView({
     setFormName(ex.name || '');
     setFormDuration(ex.duration || 15);
     setFormDescription(ex.description || '');
+    setFormTacticalBoards(ex.tacticalBoards || []);
     
     // Fallback if ex.categories isn't present
     const initialCats = ex.categories && ex.categories.length > 0 
@@ -207,7 +226,8 @@ export default function ExerciseBankView({
     setFormCategories(initialCats);
     
     setFormExternalLink(ex.externalLink || '');
-    setFormImageUrl(ex.imageUrl || '');
+    setFormImageUrl('');
+    setFormImageUrls(ex.imageUrls || (ex.imageUrl ? [ex.imageUrl] : []));
     setIsModalOpen(true);
   };
 
@@ -217,6 +237,9 @@ export default function ExerciseBankView({
 
     const finalCategories = formCategories.length > 0 ? formCategories : ['Annat'];
 
+    const firstImg = formImageUrls[0] || formImageUrl.trim() || undefined;
+    const finalUrls = formImageUrls.length > 0 ? formImageUrls : (formImageUrl.trim() ? [formImageUrl.trim()] : []);
+
     const dataPayload = {
       name: formName.trim(),
       duration: Number(formDuration) || 15,
@@ -224,7 +247,9 @@ export default function ExerciseBankView({
       category: finalCategories[0], // for compatibility
       categories: finalCategories,
       externalLink: formExternalLink.trim() || undefined,
-      imageUrl: formImageUrl.trim() || undefined
+      imageUrl: firstImg,
+      imageUrls: finalUrls.length > 0 ? finalUrls : undefined,
+      tacticalBoards: formTacticalBoards
     };
 
     if (editingExercise) {
@@ -248,38 +273,57 @@ export default function ExerciseBankView({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
+    const filesArray = Array.from(files) as File[];
     setIsUploading(true);
-    setUploadProgress(0);
+    setUploadProgress(10);
 
-    const fileName = `${Date.now()}_${file.name}`;
-    const storageRef = ref(storage, `moments/bank_exercises/${fileName}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
-
-    uploadTask.on('state_changed',
-      (snapshot) => {
-        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        setUploadProgress(Math.round(progress));
-      },
-      (error) => {
-        console.error("Upload error:", error);
-        alert("Något gick fel vid uppladdningen. Försök igen.");
-        setIsUploading(false);
-      },
-      async () => {
-        try {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          setFormImageUrl(downloadUrl);
-        } catch (err) {
-          console.error("URL retrieval error:", err);
-        } finally {
-          setIsUploading(false);
+    try {
+      const uploadPromises = filesArray.map(async (file) => {
+        if (file.size > 5 * 1024 * 1024) {
+          console.warn(`Filen ${file.name} är för stor (max 5MB)`);
+          return null;
         }
+
+        const fileName = `${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, `moments/bank_exercises/${fileName}`);
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        return new Promise<string | null>((resolve, reject) => {
+          uploadTask.on('state_changed',
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+            },
+            (error) => {
+              console.error("Upload error", error);
+              reject(error);
+            },
+            async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(downloadURL);
+            }
+          );
+        });
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const filteredResults = results.filter((url): url is string => url !== null);
+
+      if (filteredResults.length > 0) {
+        setFormImageUrls(prev => [...prev, ...filteredResults]);
       }
-    );
+      setIsUploading(false);
+    } catch (error) {
+      console.error("Upload failed:", error);
+      setIsUploading(false);
+      alert("Kunde inte ladda upp en eller flera bilder.");
+    }
+
+    if (e.target) e.target.value = '';
   };
 
   // Filter bank items
@@ -405,13 +449,27 @@ export default function ExerciseBankView({
 
                   {/* Thumbnail */}
                   {ex.imageUrl && (
-                    <div className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-750">
+                    <div 
+                      onClick={() => {
+                        const images = getExerciseImages(ex);
+                        if (images.length > 0) {
+                          setViewingImageInfo({ urls: images, index: 0 });
+                        }
+                      }}
+                      className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-750 cursor-zoom-in group/thumb"
+                    >
                       <img
                         src={ex.imageUrl}
                         alt={ex.name}
                         referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-103"
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-[1.03]"
                       />
+                      {getExerciseImages(ex).length > 1 && (
+                        <div className="absolute bottom-3 right-3 bg-zinc-950/70 border border-white/10 text-white text-[10px] font-black px-2 py-1 rounded-lg backdrop-blur-md flex items-center gap-1 shadow-sm z-10">
+                          <ImageIcon size={11} className="text-zinc-300" />
+                          <span>1 / {getExerciseImages(ex).length}</span>
+                        </div>
+                      )}
                       <div className="absolute top-3 left-3 flex flex-wrap gap-1 max-w-[70%] pointer-events-none">
                         {getExerciseCategories(ex).map(cat => (
                           <span key={cat} className="bg-zinc-900/80 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider">
@@ -473,6 +531,15 @@ export default function ExerciseBankView({
                         >
                           <Plus size={13} />
                           <span>Planera</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTacticalBoardExercise(ex)}
+                          className="p-1 px-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
+                          title="Öppna rittavla"
+                        >
+                          <Layout size={11} />
+                          <span>Rittavla {ex.tacticalBoards && ex.tacticalBoards.length > 0 ? `(${ex.tacticalBoards.length})` : ''}</span>
                         </button>
                         <button
                           type="button"
@@ -887,67 +954,101 @@ export default function ExerciseBankView({
                 {/* Image Upload/Link */}
                 <div className="space-y-1.5">
                   <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
-                    Övningsbild
+                    Övningsbilder ({formImageUrls.length})
                   </label>
-                  
-                  {formImageUrl ? (
-                    <div className="relative w-full h-32 rounded-xl overflow-hidden border border-zinc-250 dark:border-zinc-705">
-                      <img
-                        src={formImageUrl}
-                        alt="Övningsbild"
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setFormImageUrl('')}
-                        className="absolute top-2 right-2 p-1 bg-black/65 backdrop-blur-sm text-white hover:bg-black/80 rounded-full transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={formImageUrl}
-                          onChange={(e) => setFormImageUrl(e.target.value)}
-                          placeholder="Klistra in en bildlänk..."
-                          className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isUploading}
-                          className="flex items-center justify-center gap-1.5 bg-zinc-100 dark:bg-zinc-750 hover:bg-zinc-200 dark:hover:bg-zinc-700 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-50"
-                        >
-                          {isUploading ? (
-                            <Loader2 size={14} className="animate-spin text-zinc-500" />
-                          ) : (
-                            <Upload size={14} className="text-zinc-500 dark:text-zinc-400" />
+
+                  {/* Thumbnails grid */}
+                  {formImageUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-3 bg-zinc-50 dark:bg-zinc-900/40 rounded-2xl border border-zinc-150 dark:border-zinc-750/80">
+                      {formImageUrls.map((url, idx) => (
+                        <div key={idx} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-750 shadow-sm shrink-0 bg-white dark:bg-zinc-800">
+                          <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormImageUrls(prev => prev.filter((_, i) => i !== idx));
+                            }}
+                            className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
+                            title="Ta bort bild"
+                          >
+                            <X size={10} />
+                          </button>
+                          {idx === 0 && (
+                            <span className="absolute bottom-1 left-1 px-1 bg-indigo-650 text-white text-[8px] font-black uppercase rounded">
+                              Huvudbild
+                            </span>
                           )}
-                          <span>Ladda upp</span>
-                        </button>
-                      </div>
-                      
-                      {isUploading && (
-                        <div className="w-full bg-zinc-100 dark:bg-zinc-900 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="bg-indigo-650 h-full transition-all duration-300"
-                            style={{ width: `${uploadProgress}%` }}
-                          />
                         </div>
-                      )}
-                      
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        accept="image/*"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
+                      ))}
                     </div>
                   )}
+
+                  {/* Add Image Inputs */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={formImageUrl}
+                        onChange={(e) => setFormImageUrl(e.target.value)}
+                        placeholder="Klistra in en bildlänk..."
+                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-150"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (formImageUrl.trim()) {
+                              setFormImageUrls(prev => [...prev, formImageUrl.trim()]);
+                              setFormImageUrl('');
+                            }
+                          }
+                        }}
+                      />
+                      {formImageUrl.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (formImageUrl.trim()) {
+                              setFormImageUrls(prev => [...prev, formImageUrl.trim()]);
+                              setFormImageUrl('');
+                            }
+                          }}
+                          className="bg-zinc-100 dark:bg-zinc-750 hover:bg-zinc-250 dark:hover:bg-zinc-700 px-3.5 rounded-xl text-xs font-bold transition-colors text-zinc-700 dark:text-zinc-300"
+                        >
+                          Lägg till
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 border border-indigo-100/30"
+                      >
+                        {isUploading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Upload size={14} />
+                        )}
+                        <span>{formImageUrls.length > 0 ? 'Fler' : 'Välj bilder'}</span>
+                      </button>
+                    </div>
+
+                    {isUploading && (
+                      <div className="w-full bg-zinc-100 dark:bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-indigo-650 h-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    )}
+
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      multiple
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </div>
                 </div>
 
                 {/* External Link */}
@@ -962,6 +1063,28 @@ export default function ExerciseBankView({
                     placeholder="https://www.youtube.com/... eller liknande"
                     className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155"
                   />
+                </div>
+
+                {/* Tactical Boards Whiteboard Section */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                    Rittavlor ({formTacticalBoards.length})
+                  </label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                    Skapa och rita illustrationer eller taktiska genomgångar för övningen.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsFormTacticalBoardOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/25 dark:hover:bg-emerald-950/45 text-emerald-750 dark:text-emerald-400 rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-emerald-200 dark:border-emerald-900/40 active:scale-95"
+                    >
+                      <Layout size={14} />
+                      <span>{formTacticalBoards.length > 0 ? 'Öppna rittavlor' : 'Skapa rittavla'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Footer Buttons */}
@@ -986,6 +1109,102 @@ export default function ExerciseBankView({
           </div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {viewingImageInfo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[120] flex items-center justify-center p-4 sm:p-8"
+            onClick={() => setViewingImageInfo(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-w-5xl w-full max-h-full flex flex-col items-center gap-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setViewingImageInfo(null)}
+                className="absolute -top-12 sm:top-0 sm:-right-16 p-3 text-white/50 hover:text-white transition-colors"
+                title="Stäng bild"
+              >
+                <X size={32} />
+              </button>
+              
+              <div className="relative w-full h-[60vh] sm:h-[70vh] rounded-2xl overflow-hidden shadow-2xl bg-zinc-900 border border-white/10 flex items-center justify-center group">
+                <img 
+                  src={viewingImageInfo.urls[viewingImageInfo.index]} 
+                  alt="Fullskärmsbild" 
+                  className="max-w-full max-h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
+
+                {viewingImageInfo.urls.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => setViewingImageInfo(prev => prev ? ({ ...prev, index: (prev.index - 1 + prev.urls.length) % prev.urls.length }) : null)}
+                      className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/60 text-white rounded-full transition-all opacity-100 sm:opacity-0 group-hover:opacity-100"
+                    >
+                      <ChevronDown className="rotate-90" size={24} />
+                    </button>
+                    <button
+                      onClick={() => setViewingImageInfo(prev => prev ? ({ ...prev, index: (prev.index + 1) % prev.urls.length }) : null)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/60 text-white rounded-full transition-all opacity-100 sm:opacity-0 group-hover:opacity-100"
+                    >
+                      <ChevronUp className="rotate-90" size={24} />
+                    </button>
+                    <div className="absolute bottom-4 left-1/2 -translate-y-1/2 -translate-x-1/2 px-3 py-1 bg-black/40 text-white text-[10px] font-black rounded-full backdrop-blur-md">
+                      {viewingImageInfo.index + 1} / {viewingImageInfo.urls.length}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setViewingImageInfo(null)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest backdrop-blur-md transition-all border border-white/10"
+                >
+                  Stäng
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Direct whiteboard modal from exercise cards */}
+      {tacticalBoardExercise && (
+        <TacticalBoardModal
+          boards={tacticalBoardExercise.tacticalBoards || []}
+          onSave={(updatedBoards) => {
+            if (onUpdateBankExercise) {
+              onUpdateBankExercise(tacticalBoardExercise.id, { tacticalBoards: updatedBoards });
+            }
+            setTacticalBoardExercise(null);
+          }}
+          onClose={() => setTacticalBoardExercise(null)}
+          squad={squad}
+          title={`Rittavla - ${tacticalBoardExercise.name}`}
+        />
+      )}
+
+      {/* Whiteboard modal from within Create/Edit Form modal */}
+      {isFormTacticalBoardOpen && (
+        <TacticalBoardModal
+          boards={formTacticalBoards}
+          onSave={(updatedBoards) => {
+            setFormTacticalBoards(updatedBoards);
+            setIsFormTacticalBoardOpen(false);
+          }}
+          onClose={() => setIsFormTacticalBoardOpen(false)}
+          squad={squad}
+          title={`Rittavlor - ${formName || 'Ny övning'}`}
+        />
+      )}
     </div>
   );
 }

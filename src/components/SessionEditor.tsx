@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
@@ -7,6 +7,7 @@ import { TrainingSession, SessionMoment, Exercise, SquadPlayer } from '../types'
 import TeamOverviewModal from './TeamOverviewModal';
 import { sortLeadersByPosition } from '../lib/teamUtils';
 import MomentCopyModal from './MomentCopyModal';
+import TacticalBoardModal from './TacticalBoardModal';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -23,6 +24,7 @@ interface SessionEditorProps {
   initialMode?: 'plan' | 'live';
   onModeChange?: (mode: 'plan' | 'live') => void;
   initialTab?: 'schema' | 'attendance';
+  adminUrl?: string;
   allSessions?: TrainingSession[];
   onUpdateSession?: (updated: TrainingSession) => void;
   exerciseBank?: any[];
@@ -52,6 +54,7 @@ interface MomentItemProps {
   exerciseBank?: any[];
   onSaveToBank?: (moment: SessionMoment) => any;
   onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
+  onOpenTacticalBoard?: (moment: SessionMoment) => void;
 }
 
 function MomentItem({ 
@@ -74,13 +77,15 @@ function MomentItem({
   onAddAfter,
   exerciseBank = [],
   onSaveToBank,
-  onUpdateBankExercise
+  onUpdateBankExercise,
+  onOpenTacticalBoard
 }: MomentItemProps & { onAddAfter?: () => void }) {
   const dragControls = useDragControls();
   const [showMediaInputs, setShowMediaInputs] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [imageUrlInput, setImageUrlInput] = useState('');
 
   const [justUpdatedBank, setJustUpdatedBank] = useState(false);
   const [justFetchedBank, setJustFetchedBank] = useState(false);
@@ -101,12 +106,18 @@ function MomentItem({
 
   const hasModifications = useMemo(() => {
     if (!bankExercise) return false;
+    
+    const bankUrls = bankExercise.imageUrls || (bankExercise.imageUrl ? [bankExercise.imageUrl] : []);
+    const momentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+    const urlsDiffer = JSON.stringify([...bankUrls].sort()) !== JSON.stringify([...momentUrls].sort());
+
     return (
       (moment.name || '').trim() !== (bankExercise.name || '').trim() ||
       (moment.duration || 15) !== (bankExercise.duration || 15) ||
       (moment.description || '').trim() !== (bankExercise.description || '').trim() ||
       (moment.externalLink || '').trim() !== (bankExercise.externalLink || '').trim() ||
-      (moment.imageUrl || '').trim() !== (bankExercise.imageUrl || '').trim()
+      (moment.imageUrl || '').trim() !== (bankExercise.imageUrl || '').trim() ||
+      urlsDiffer
     );
   }, [moment, bankExercise]);
 
@@ -322,76 +333,127 @@ function MomentItem({
                       exit={{ height: 0, opacity: 0 }}
                       className="space-y-3 overflow-hidden"
                     >
-                      <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-                          <ImageIcon size={16} />
+                      <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        {/* Title & Count */}
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                            Övningsbilder ({(moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0)})
+                          </span>
                         </div>
-                        <div className="flex-1 flex items-center gap-2">
-                          <div className="flex-1 text-xs font-bold text-zinc-400 italic">
-                            {(moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0)} bilder uppladdade
-                          </div>
-                          <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleFileUpload}
-                            accept="image/*"
-                            multiple
-                            className="hidden"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploadProgress !== null}
-                            className={`p-2 px-4 rounded-xl transition-all flex items-center gap-2 ${
-                              uploadProgress !== null 
-                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed'
-                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm active:scale-95'
-                            }`}
-                            title="Ladda upp bilder"
-                          >
-                            {uploadProgress !== null ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <Upload size={14} />
-                            )}
-                            <span className="text-[10px] font-black uppercase">
-                              {uploadProgress !== null ? 'Laddar upp...' : 'Välj bilder'}
-                            </span>
-                          </button>
-                        </div>
-                      </div>
 
-                      {(moment.imageUrls || moment.imageUrl) && (
-                        <div className="flex flex-wrap gap-2 px-1">
-                          {moment.imageUrl && (
-                            <div className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                              <img src={moment.imageUrl} className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => updateMoment(moment.id, { imageUrl: undefined })}
-                                className="absolute top-1 right-1 p-1.5 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md"
-                              >
-                                <X size={10} />
-                              </button>
+                        {/* Thumbnails if any */}
+                        {((moment.imageUrls && moment.imageUrls.length > 0) || moment.imageUrl) && (
+                          <div className="flex flex-wrap gap-2 p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                            {moment.imageUrl && (
+                              <div className="relative group w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-805 shadow-sm shrink-0 bg-white dark:bg-zinc-950">
+                                <img src={moment.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <button
+                                  type="button"
+                                  onClick={() => updateMoment(moment.id, { imageUrl: undefined })}
+                                  className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
+                                  title="Ta bort bild"
+                                >
+                                  <X size={10} />
+                                </button>
+                                <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
+                                  Huvudbild
+                                </span>
+                              </div>
+                            )}
+                            {moment.imageUrls?.map((url, idx) => (
+                              <div key={idx} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-805 shadow-sm shrink-0 bg-white dark:bg-zinc-950">
+                                <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newUrls = (moment.imageUrls || []).filter((_, i) => i !== idx);
+                                    updateMoment(moment.id, { imageUrls: newUrls });
+                                  }}
+                                  className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
+                                  title="Ta bort bild"
+                                >
+                                  <X size={10} />
+                                </button>
+                                {!moment.imageUrl && idx === 0 && (
+                                  <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
+                                    Huvudbild
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add image (link & upload) */}
+                        <div className="flex flex-col gap-2">
+                          <div className="flex gap-2">
+                            <div className="flex-1 flex items-center gap-2 bg-white dark:bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-150 dark:border-zinc-800 min-w-0">
+                              <ImageIcon size={14} className="text-zinc-400 shrink-0" />
+                              <input
+                                type="text"
+                                value={imageUrlInput}
+                                onChange={(e) => setImageUrlInput(e.target.value)}
+                                placeholder="Klistra in en bildlänk..."
+                                className="flex-1 min-w-0 bg-transparent border-none p-0 text-xs font-bold text-zinc-805 dark:text-zinc-150 focus:ring-0 placeholder:text-zinc-400"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (imageUrlInput.trim()) {
+                                      const currentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+                                      updateMoment(moment.id, {
+                                        imageUrls: [...currentUrls, imageUrlInput.trim()],
+                                        imageUrl: undefined
+                                      });
+                                      setImageUrlInput('');
+                                    }
+                                  }
+                                }}
+                              />
                             </div>
-                          )}
-                          {moment.imageUrls?.map((url, idx) => (
-                            <div key={idx} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                              <img src={url} className="w-full h-full object-cover" />
+                            
+                            {imageUrlInput.trim() && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const newUrls = (moment.imageUrls || []).filter((_, i) => i !== idx);
-                                  updateMoment(moment.id, { imageUrls: newUrls });
+                                  if (imageUrlInput.trim()) {
+                                    const currentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+                                    updateMoment(moment.id, {
+                                      imageUrls: [...currentUrls, imageUrlInput.trim()],
+                                      imageUrl: undefined
+                                    });
+                                    setImageUrlInput('');
+                                  }
                                 }}
-                                className="absolute top-1 right-1 p-1.5 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md"
+                                className="bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-350 dark:hover:bg-zinc-700 px-3 rounded-xl text-xs font-bold transition-colors text-zinc-700 dark:text-zinc-300"
                               >
-                                <X size={10} />
+                                Lägg till
                               </button>
-                            </div>
-                          ))}
+                            )}
+
+                            <input
+                              type="file"
+                              ref={fileInputRef}
+                              onChange={handleFileUpload}
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploadProgress !== null}
+                              className={`flex items-center justify-center gap-1.5 bg-indigo-55 hover:bg-indigo-105 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 border border-indigo-100/20 whitespace-nowrap`}
+                            >
+                              {uploadProgress !== null ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <Upload size={14} />
+                              )}
+                              <span>{((moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0)) > 0 ? 'Fler' : 'Välj bilder'}</span>
+                            </button>
+                          </div>
                         </div>
-                      )}
+                      </div>
 
                       {uploadProgress !== null && (
                         <div className="px-3 pb-1">
@@ -560,6 +622,16 @@ function MomentItem({
                   )}
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => onOpenTacticalBoard && onOpenTacticalBoard(moment)}
+                  className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-all border shadow-sm bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/25 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40 active:scale-95"
+                  title="Öppna rittavla för att förklara övningen"
+                >
+                  <Layout size={11} />
+                  <span>Rittavla {moment.tacticalBoards && moment.tacticalBoards.length > 0 ? `(${moment.tacticalBoards.length})` : ''}</span>
+                </button>
+
                 {onCreateExercise && !moment.exerciseId && (
                   <button
                     onClick={() => {
@@ -608,7 +680,8 @@ function MomentItem({
                                     description: moment.description,
                                     externalLink: moment.externalLink,
                                     imageUrl: moment.imageUrl,
-                                    imageUrls: moment.imageUrl ? [moment.imageUrl] : undefined,
+                                    imageUrls: moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []),
+                                    tacticalBoards: moment.tacticalBoards,
                                   });
                                   setJustUpdatedBank(true);
                                   setTimeout(() => setJustUpdatedBank(false), 2000);
@@ -661,19 +734,35 @@ function MomentItem({
                 )}
               </>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {onOpenTacticalBoard && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTacticalBoard(moment)}
+                    className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all border shadow-sm active:scale-95 cursor-pointer ${
+                      moment.tacticalBoards && moment.tacticalBoards.length > 0
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500 shadow-emerald-100 dark:shadow-none'
+                        : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-750 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
+                    }`}
+                    title="Öppna rittavla för att visa övningen"
+                  >
+                    <Layout size={14} />
+                    <span>Visa rittavla {moment.tacticalBoards && moment.tacticalBoards.length > 0 ? `(${moment.tacticalBoards.length})` : ''}</span>
+                  </button>
+                )}
+
                 {moment.exerciseId && onSelectExercise && (
                   <>
                     <button
                       onClick={() => onSelectExercise(moment.exerciseId!)}
-                      className="bg-indigo-600 text-white px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-[0.98]"
+                      className="bg-indigo-600 text-white px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-[0.98] cursor-pointer"
                     >
                       <Play fill="currentColor" size={12} />
                       Starta tävling
                     </button>
                     <button
                       onClick={() => onShowTeams && onShowTeams(moment.exerciseId!)}
-                      className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700"
+                      className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
                       title="Visa lagöversikt"
                     >
                       <Users size={16} />
@@ -683,7 +772,7 @@ function MomentItem({
                 {moment.exerciseId && onEditExercise && (
                   <button
                     onClick={() => onEditExercise(moment.exerciseId!)}
-                    className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700"
+                    className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
                     title="Redigera tävlingsmoment"
                   >
                     <Edit2 size={16} />
@@ -733,6 +822,7 @@ export default function SessionEditor({
   initialMode = 'plan',
   onModeChange,
   initialTab = 'schema',
+  adminUrl,
   allSessions,
   onUpdateSession,
   exerciseBank = [],
@@ -748,6 +838,7 @@ export default function SessionEditor({
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
   const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'schema' | 'attendance'>(initialTab);
+  const [tacticalBoardMoment, setTacticalBoardMoment] = useState<SessionMoment | null>(null);
   const mode = initialMode;
   const setMode = onModeChange || (() => {});
 
@@ -1421,6 +1512,7 @@ export default function SessionEditor({
                     exerciseBank={exerciseBank}
                     onSaveToBank={onSaveToBank}
                     onUpdateBankExercise={onUpdateBankExercise}
+                    onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
                   />
                 ))}
               </Reorder.Group>
@@ -1481,6 +1573,7 @@ export default function SessionEditor({
               session={session} 
               squad={squad} 
               onUpdate={onUpdate}
+              adminUrl={adminUrl}
             />
           )}
           
@@ -1590,6 +1683,20 @@ export default function SessionEditor({
           exerciseBankCategories={exerciseBankCategories}
         />
       )}
+
+      {/* Reusable Whiteboard Modal for Moments */}
+      {tacticalBoardMoment && (
+        <TacticalBoardModal
+          boards={tacticalBoardMoment.tacticalBoards || []}
+          onSave={(updatedBoards) => {
+            updateMoment(tacticalBoardMoment.id, { tacticalBoards: updatedBoards });
+            setTacticalBoardMoment(null);
+          }}
+          onClose={() => setTacticalBoardMoment(null)}
+          squad={squad}
+          title={`Rittavla - ${tacticalBoardMoment.name || 'Moment'}`}
+        />
+      )}
     </div>
   );
 }
@@ -1641,10 +1748,12 @@ function ParticipantManager({
   session, 
   squad, 
   onUpdate, 
+  adminUrl,
 }: { 
   session: TrainingSession, 
   squad: SquadPlayer[], 
-  onUpdate: (updated: TrainingSession) => void
+  onUpdate: (updated: TrainingSession) => void,
+  adminUrl?: string,
 }) {
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
@@ -1808,19 +1917,19 @@ function ParticipantManager({
             <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj medlemmar från truppen eller lägg till provspelare</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-            <button
-              onClick={() => setSortAttendingFirst(!sortAttendingFirst)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-[10px] uppercase transition-all ${
-                sortAttendingFirst 
-                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm' 
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-zinc-100 dark:border-zinc-700 hover:border-zinc-200'
-              }`}
-              title="Sortera närvarande först"
-            >
-              <Users size={12} className={sortAttendingFirst ? 'text-white' : 'text-zinc-400'} />
-              <span>Närvarande först</span>
-            </button>
-            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800 hidden sm:block" />
+            {adminUrl && (
+              <a
+                href={adminUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap transition-colors"
+                title="Öppna Adminsida"
+              >
+                <ShieldCheck size={14} />
+                <span>Öppna adminsida</span>
+              </a>
+            )}
+            {adminUrl && <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />}
             <button
               onClick={() => setPasteMode(true)}
               className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap"
@@ -1841,6 +1950,19 @@ function ParticipantManager({
               className="text-zinc-400 hover:text-red-500 font-bold text-[10px] uppercase whitespace-nowrap"
             >
               Ingen närvarande
+            </button>
+            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
+            <button
+              onClick={() => setSortAttendingFirst(!sortAttendingFirst)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-[10px] uppercase transition-all ${
+                sortAttendingFirst 
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm' 
+                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-zinc-100 dark:border-zinc-700 hover:border-zinc-200'
+              }`}
+              title="Sortera närvarande först"
+            >
+              <Users size={12} className={sortAttendingFirst ? 'text-white' : 'text-zinc-400'} />
+              <span>Närvarande först</span>
             </button>
           </div>
         </div>

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 // import html2canvas from 'html-to-image'; // Removed
-import Cropper, { Area, Point } from 'react-easy-crop';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
@@ -10,6 +9,7 @@ import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, Clipb
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
 import ColorPicker from './ColorPicker';
+import ImageCropper from './ImageCropper';
 
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from '../lib/firebase';
@@ -371,9 +371,6 @@ export default function LineupBuilder({
   // Custom Logo Upload States
   const [showLogoPicker, setShowLogoPicker] = useState(false);
   const [logoToCrop, setLogoToCrop] = useState<string | null>(null);
-  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -437,24 +434,27 @@ export default function LineupBuilder({
   const markerSuffix = useMemo(() => Math.random().toString(36).substring(2, 7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle'>('move');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square'>('move');
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const [pitchAspectRatio, setPitchAspectRatio] = useState(1);
+  const pitchAspectRatio = 68/105;
+  const constrainSquare = (p0: { x: number, y: number }, p1: { x: number, y: number }) => {
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const signX = Math.sign(dx) || 1;
+    const signY = Math.sign(dy) || 1;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    // Since width maps to 0..100 and height maps to 0..100, we must adjust for pitch's aspect ratio (width/height)
+    // to render as a perfect 1:1 visual square on screen.
+    const size = Math.max(absX, absY * pitchAspectRatio);
+    return {
+      x: p0.x + signX * size,
+      y: p0.y + signY * (size / pitchAspectRatio)
+    };
+  };
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [isTransforming, setIsTransforming] = useState<'move' | 'resize' | null>(null);
   const [transformStart, setTransformStart] = useState<{ x: number, y: number, initialPoints: any[] } | null>(null);
-
-  // Track pitch aspect ratio for circular drawings
-  useEffect(() => {
-    if (!fieldRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setPitchAspectRatio(entry.contentRect.width / entry.contentRect.height);
-      }
-    });
-    observer.observe(fieldRef.current);
-    return () => observer.disconnect();
-  }, [isMaximized, orientation]);
 
   // Sync tactical players with main players (handles additions/deletions/subs while keeping custom positioning on the drawing board)
   useEffect(() => {
@@ -957,19 +957,18 @@ export default function LineupBuilder({
       setDraggingBall(true);
       return;
     }
-
     if (tacticalTool === 'move') {
       // First check if we're clicking a resize handle of a selected drawing
       if (selectedDrawingId) {
         const draw = tacticalDrawings.find(d => d.id === selectedDrawingId);
         if (draw) {
-          if (draw.type === 'circle') {
+          if (draw.type === 'circle' || draw.type === 'rectangle' || draw.type === 'square') {
              // Resize handle check (near the bottom right of the "bounding box" or edge)
              const dist = Math.hypot(draw.points[1].x - x, draw.points[1].y - y);
              if (dist < 5) {
-               setIsTransforming('resize');
-               setTransformStart({ x, y, initialPoints: [...draw.points] });
-               return;
+                setIsTransforming('resize');
+                setTransformStart({ x, y, initialPoints: [...draw.points] });
+                return;
              }
           } else if (draw.type === 'text') {
              // For text, resizing is harder to define without a box, maybe just move for now
@@ -989,6 +988,13 @@ export default function LineupBuilder({
            const dy = (y - d.points[0].y) / pitchAspectRatio;
            const distToCenter = Math.sqrt(dx*dx + dy*dy);
            return distToCenter < radiusSVG * 1.1; // Clicked inside or near edge
+        }
+        if (d.type === 'rectangle' || d.type === 'square') {
+           const xMin = Math.min(d.points[0].x, d.points[1].x);
+           const xMax = Math.max(d.points[0].x, d.points[1].x);
+           const yMin = Math.min(d.points[0].y, d.points[1].y);
+           const yMax = Math.max(d.points[0].y, d.points[1].y);
+           return x >= xMin - 2 && x <= xMax + 2 && y >= yMin - 2 && y <= yMax + 2;
         }
         return d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 5);
       });
@@ -1028,8 +1034,16 @@ export default function LineupBuilder({
            const dist = Math.sqrt(Math.pow(dx / rx, 2) + Math.pow(dy / ry, 2));
            return Math.abs(dist - 1) > 0.2; // Tolerance for clicking on the line
         }
+        if (d.type === 'rectangle' || d.type === 'square') {
+           const xMin = Math.min(d.points[0].x, d.points[1].x);
+           const xMax = Math.max(d.points[0].x, d.points[1].x);
+           const yMin = Math.min(d.points[0].y, d.points[1].y);
+           const yMax = Math.max(d.points[0].y, d.points[1].y);
+           const inside = x >= xMin - 2 && x <= xMax + 2 && y >= yMin - 2 && y <= yMax + 2;
+           return !inside;
+        }
         return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 3);
-      }));
+      }));;
       // Also remove opponents if clicked near
       setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 5));
       // Remove football if clicked near
@@ -1041,6 +1055,15 @@ export default function LineupBuilder({
     }
 
     if (tacticalTool === 'text') {
+      // Check if clicking near/on an existing text element to edit it directly
+      const clickedText = tacticalDrawings.slice().reverse().find(d => {
+        return d.type === 'text' && Math.hypot(d.points[0].x - x, d.points[0].y - y) < 8;
+      });
+      if (clickedText) {
+        setEditingTextId(clickedText.id);
+        return;
+      }
+
       pushHistory();
       const id = Math.random().toString(36).substr(2, 9);
       const newText = {
@@ -1109,7 +1132,15 @@ export default function LineupBuilder({
              const newPoints = [d.points[0], { x, y }];
              return { ...d, points: newPoints };
           }
-           // Add other resize logic as needed
+          if (d.type === 'rectangle') {
+             const newPoints = [d.points[0], { x, y }];
+             return { ...d, points: newPoints };
+          }
+          if (d.type === 'square') {
+             const constrained = constrainSquare(d.points[0], { x, y });
+             const newPoints = [d.points[0], constrained];
+             return { ...d, points: newPoints };
+          }
         }
         return d;
       }));
@@ -1120,9 +1151,20 @@ export default function LineupBuilder({
     if (!isDrawing) return;
 
     if (tacticalTool === 'pen' || tacticalTool === 'freehand-arrow') {
-      setCurrentPath(prev => [...prev, { x, y }]);
-    } else if (tacticalTool === 'arrow' || tacticalTool === 'circle') {
-      setCurrentPath(prev => [prev[0], { x, y }]);
+      setCurrentPath(prev => {
+        if (prev.length === 0) return [{ x, y }];
+        const last = prev[prev.length - 1];
+        const dist = Math.hypot(x - last.x, y - last.y);
+        if (dist < 1.2) return prev; // Filter out tiny jitters to stabilize the drawing and arrowheads
+        return [...prev, { x, y }];
+      });
+    } else if (tacticalTool === 'arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square') {
+      if (tacticalTool === 'square') {
+        const constrained = constrainSquare(currentPath[0], { x, y });
+        setCurrentPath([currentPath[0], constrained]);
+      } else {
+        setCurrentPath([currentPath[0], { x, y }]);
+      }
     }
   };
 
@@ -2001,10 +2043,6 @@ export default function LineupBuilder({
     setIsEditingTitle(true);
   };
 
-  const onCropComplete = (_croppedArea: Area, croppedAreaPixels: Area) => {
-    setCroppedAreaPixels(croppedAreaPixels);
-  };
-
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const reader = new FileReader();
@@ -2013,46 +2051,6 @@ export default function LineupBuilder({
         setShowLogoPicker(true);
       });
       reader.readAsDataURL(e.target.files[0]);
-    }
-  };
-
-  const generateCroppedLogo = async () => {
-    if (!logoToCrop || !croppedAreaPixels) return;
-
-    try {
-      const image = new Image();
-      image.src = logoToCrop;
-      await new Promise((resolve) => (image.onload = resolve));
-
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) return;
-
-      canvas.width = croppedAreaPixels.width;
-      canvas.height = croppedAreaPixels.height;
-
-      ctx.drawImage(
-        image,
-        croppedAreaPixels.x,
-        croppedAreaPixels.y,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height,
-        0,
-        0,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height
-      );
-
-      const croppedDataUrl = canvas.toDataURL('image/png');
-      setTeamLogoUrl(croppedDataUrl);
-      setShowLogoPicker(false);
-      setLogoToCrop(null);
-      setHasUnsavedChanges(true);
-      // Reset input value so same file can be uploaded again
-      if (logoInputRef.current) logoInputRef.current.value = '';
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -2370,23 +2368,39 @@ export default function LineupBuilder({
               <div className="text-right hidden xs:block">
                 <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{user?.displayName || 'Gäst'}</p>
               </div>
-              <div 
-                onClick={isSimplified ? undefined : () => logoInputRef.current?.click()}
-                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm transition-all relative ${isSimplified ? '' : 'hover:border-indigo-400 active:scale-95 group/logo cursor-pointer'}`}
-              >
-                {teamLogoUrl ? (
-                  <CachedImage src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-cover" />
-                ) : user?.photoURL ? (
-                  <CachedImage src={user.photoURL} alt="User Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20">
-                    <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
-                  </div>
-                )}
-                {!isSimplified && (
-                  <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover/logo:opacity-100 flex items-center justify-center transition-opacity">
-                    <Upload size={14} className="text-indigo-600" />
-                  </div>
+              <div className="relative group/logo">
+                <div 
+                  onClick={isSimplified ? undefined : () => logoInputRef.current?.click()}
+                  className={`w-10 h-10 sm:w-12 sm:h-12 transition-all relative ${isSimplified ? '' : 'hover:scale-105 active:scale-95 cursor-pointer'}`}
+                >
+                  {teamLogoUrl ? (
+                    <CachedImage src={teamLogoUrl} alt="Team Logo" className="w-full h-full object-contain border-0 outline-none select-none shadow-none ring-0" />
+                  ) : user?.photoURL ? (
+                    <CachedImage src={user.photoURL} alt="User Profile" className="w-full h-full rounded-full object-cover border border-zinc-200 dark:border-zinc-800" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl sm:rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-900/40">
+                      <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                  )}
+                  {!isSimplified && (
+                    <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover/logo:opacity-100 flex items-center justify-center transition-opacity rounded-xl sm:rounded-2xl">
+                      <Upload size={14} className="text-indigo-600" />
+                    </div>
+                  )}
+                </div>
+                {teamLogoUrl && !isSimplified && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTeamLogoUrl('');
+                      setHasUnsavedChanges(true);
+                      if (logoInputRef.current) logoInputRef.current.value = '';
+                    }}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover/logo:opacity-100 transition-opacity shadow-lg z-10 hover:bg-red-600 hover:scale-110 active:scale-90"
+                    title="Ta bort logotyp"
+                  >
+                    <X size={10} strokeWidth={3} />
+                  </button>
                 )}
               </div>
             </div>
@@ -2709,8 +2723,21 @@ export default function LineupBuilder({
                       ry={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
                       fill="none"
                       stroke={draw.color}
-                      strokeWidth={draw.lineWidth || 0.8}
-                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                      strokeWidth={(draw.lineWidth || 0.8) * 4}
+                      strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ) : (draw.type === 'rectangle' || draw.type === 'square') ? (
+                    <rect
+                      x={Math.min(draw.points[0].x, draw.points[1].x)}
+                      y={Math.min(draw.points[0].y, draw.points[1].y)}
+                      width={Math.abs(draw.points[0].x - draw.points[1].x)}
+                      height={Math.abs(draw.points[0].y - draw.points[1].y)}
+                      fill="none"
+                      stroke={draw.color}
+                      strokeWidth={(draw.lineWidth || 0.8) * 4}
+                      strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
+                      vectorEffect="non-scaling-stroke"
                     />
                   ) : draw.type === 'text' ? (
                     <text
@@ -2722,6 +2749,8 @@ export default function LineupBuilder({
                       textAnchor="middle"
                       dominantBaseline="middle"
                       style={{ transform: `rotate(${getCounterRotation()})`, transformOrigin: 'center', transformBox: 'fill-box' }}
+                      onDoubleClick={() => setEditingTextId(draw.id)}
+                      className="cursor-pointer select-none"
                     >
                       {draw.text}
                     </text>
@@ -2730,11 +2759,12 @@ export default function LineupBuilder({
                       d={`M ${draw.points[0].x} ${draw.points[0].y} ${draw.points.slice(1).map((p: any) => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
                       stroke={draw.color}
-                      strokeWidth={draw.lineWidth || 0.8}
+                      strokeWidth={(draw.lineWidth || 0.8) * 4}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                      strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
                       markerEnd={draw.type === 'freehand-arrow' ? `url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
+                      vectorEffect="non-scaling-stroke"
                     />
                   ) : (
                     <line
@@ -2743,9 +2773,10 @@ export default function LineupBuilder({
                       x2={draw.points[1].x}
                       y2={draw.points[1].y}
                       stroke={draw.color}
-                      strokeWidth={draw.lineWidth || 0.8}
-                      strokeDasharray={draw.lineType === 'dashed' ? "2, 1" : "none"}
+                      strokeWidth={(draw.lineWidth || 0.8) * 4}
+                      strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
                       markerEnd={`url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
+                      vectorEffect="non-scaling-stroke"
                     />
                   )}
                   
@@ -2761,8 +2792,34 @@ export default function LineupBuilder({
                             ry={(Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) + 0.5) * pitchAspectRatio}
                             fill="none"
                             stroke="#6366f1"
-                            strokeWidth="0.3"
-                            strokeDasharray="1,1"
+                            strokeWidth="1.5"
+                            strokeDasharray="4, 3"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          {/* Resize Handle */}
+                          <circle 
+                             cx={draw.points[1].x}
+                             cy={draw.points[1].y}
+                             r="1.2"
+                             fill="white"
+                             stroke="#6366f1"
+                             strokeWidth="0.4"
+                             className="pointer-events-auto cursor-nwse-resize"
+                          />
+                        </>
+                      )}
+                      {(draw.type === 'rectangle' || draw.type === 'square') && (
+                        <>
+                          <rect
+                            x={Math.min(draw.points[0].x, draw.points[1].x) - 0.5}
+                            y={Math.min(draw.points[0].y, draw.points[1].y) - 0.5}
+                            width={Math.abs(draw.points[0].x - draw.points[1].x) + 1}
+                            height={Math.abs(draw.points[0].y - draw.points[1].y) + 1}
+                            fill="none"
+                            stroke="#6366f1"
+                            strokeWidth="1.5"
+                            strokeDasharray="4, 3"
+                            vectorEffect="non-scaling-stroke"
                           />
                           {/* Resize Handle */}
                           <circle 
@@ -2784,8 +2841,9 @@ export default function LineupBuilder({
                            height="6"
                            fill="none"
                            stroke="#6366f1"
-                           strokeWidth="0.3"
-                           strokeDasharray="1,1"
+                           strokeWidth="1.5"
+                           strokeDasharray="4, 3"
+                           vectorEffect="non-scaling-stroke"
                            style={{ transform: `rotate(${getCounterRotation()})`, transformOrigin: `${draw.points[0].x}% ${draw.points[0].y}%` }}
                         />
                       )}
@@ -2805,19 +2863,33 @@ export default function LineupBuilder({
                        ry={Math.sqrt(Math.pow(currentPath[0].x - currentPath[1].x, 2) + Math.pow((currentPath[0].y - currentPath[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
                        fill="none"
                        stroke={tacticalColor}
-                       strokeWidth={tacticalLineWidth}
-                       strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                       strokeWidth={tacticalLineWidth * 4}
+                       strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
+                       vectorEffect="non-scaling-stroke"
+                     />
+                   ) : (tacticalTool === 'rectangle' || tacticalTool === 'square') ? (
+                     <rect
+                       x={Math.min(currentPath[0].x, currentPath[1].x)}
+                       y={Math.min(currentPath[0].y, currentPath[1].y)}
+                       width={Math.abs(currentPath[0].x - currentPath[1].x)}
+                       height={Math.abs(currentPath[0].y - currentPath[1].y)}
+                       fill="none"
+                       stroke={tacticalColor}
+                       strokeWidth={tacticalLineWidth * 4}
+                       strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
+                       vectorEffect="non-scaling-stroke"
                      />
                    ) : tacticalTool === 'pen' || tacticalTool === 'freehand-arrow' ? (
                     <path
                       d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
                       stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth}
+                      strokeWidth={tacticalLineWidth * 4}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                      strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
                       markerEnd={tacticalTool === 'freehand-arrow' ? `url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
+                      vectorEffect="non-scaling-stroke"
                     />
                   ) : (
                     <line
@@ -2826,9 +2898,10 @@ export default function LineupBuilder({
                       x2={currentPath[1].x}
                       y2={currentPath[1].y}
                       stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth}
-                      strokeDasharray={tacticalLineType === 'dashed' ? "2, 1" : "none"}
+                      strokeWidth={tacticalLineWidth * 4}
+                      strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
                       markerEnd={`url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
+                      vectorEffect="non-scaling-stroke"
                     />
                   )}
                 </g>
@@ -3009,16 +3082,65 @@ export default function LineupBuilder({
           </div>
 
           <div className={`absolute top-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-b-2 border-x-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`}>
-            <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-b-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+            <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-[51%] h-[35%] border-b-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
             <div className={`absolute top-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
           </div>
-          <div className={`absolute top-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-b-2 rounded-b-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+          <div className={`absolute top-[16%] left-1/2 -translate-x-1/2 w-[16%] h-[3%] border-b-2 rounded-b-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
           
           <div className={`absolute bottom-[2%] left-1/2 -translate-x-1/2 w-[55%] h-[14%] border-t-2 border-x-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`}>
-            <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-[35%] h-[35%] border-t-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+            <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-[51%] h-[35%] border-t-2 border-x-2 ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
             <div className={`absolute bottom-[65%] left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${pitchType === 'solid-white' ? 'bg-zinc-950/20' : 'bg-white/50'}`} />
           </div>
-          <div className={`absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[22%] h-[6%] border-t-2 rounded-t-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+          <div className={`absolute bottom-[16%] left-1/2 -translate-x-1/2 w-[16%] h-[3%] border-t-2 rounded-t-full overflow-hidden pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
+
+          {/* Soccer Goal Nets & Perspective Posts (Simplified outside baseline) */}
+          <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {/* TOP GOAL */}
+            {/* Shading/Net depth */}
+            <polygon
+              points="44,2 56,2 55,0.2 45,0.2"
+              fill={pitchType === 'solid-white' ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+            />
+            {/* Net back boundary wire */}
+            <line x1="45" y1="0.2" x2="55" y2="0.2" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            
+            {/* Net connection lines */}
+            <line x1="42.5" y1="0.8" x2="45" y2="0.2" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="57.5" y1="0.8" x2="55" y2="0.2" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="44" y1="2" x2="45" y2="0.2" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="56" y1="2" x2="55" y2="0.2" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+
+            {/* Solid Front Goal Posts & Crossbar */}
+            {/* Crossbar */}
+            <line x1="42.5" y1="0.8" x2="57.5" y2="0.8" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+            {/* Left Post (leans slightly inward to baseline bottom) */}
+            <line x1="44" y1="2" x2="42.5" y2="0.8" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+            {/* Right Post (leans slightly inward to baseline bottom) */}
+            <line x1="56" y1="2" x2="57.5" y2="0.8" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+
+            {/* BOTTOM GOAL */}
+            {/* Shading/Net depth */}
+            <polygon
+              points="44,98 56,98 55,99.8 45,99.8"
+              fill={pitchType === 'solid-white' ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)"}
+            />
+            {/* Net back boundary wire */}
+            <line x1="45" y1="99.8" x2="55" y2="99.8" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            
+            {/* Net connection lines */}
+            <line x1="42.5" y1="99.2" x2="45" y2="99.8" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="57.5" y1="99.2" x2="55" y2="99.8" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="44" y1="98" x2="45" y2="99.8" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+            <line x1="56" y1="98" x2="55" y2="99.8" stroke={pitchType === 'solid-white' ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)"} strokeWidth="0.12" />
+
+            {/* Solid Front Goal Posts & Crossbar */}
+            {/* Crossbar */}
+            <line x1="42.5" y1="99.2" x2="57.5" y2="99.2" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+            {/* Left Post (leans slightly inward to baseline bottom) */}
+            <line x1="44" y1="98" x2="42.5" y2="99.2" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+            {/* Right Post (leans slightly inward to baseline bottom) */}
+            <line x1="56" y1="98" x2="57.5" y2="99.2" stroke={pitchType === 'solid-white' ? "#18181b" : "#ffffff"} strokeWidth="0.35" strokeLinecap="round" />
+          </svg>
 
           {/* Draggable Players on Field */}
           <AnimatePresence>
@@ -4009,6 +4131,20 @@ export default function LineupBuilder({
                     <div className="w-5 h-5 rounded-full border-2 border-current" />
                   </button>
                   <button 
+                    onClick={() => setTacticalTool('rectangle')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Rita rektangel"
+                  >
+                    <div className="w-5.5 h-4 border-2 border-current rounded-sm" />
+                  </button>
+                  <button 
+                    onClick={() => setTacticalTool('square')}
+                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'square' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    title="Rita kvadrat"
+                  >
+                    <div className="w-5 h-5 border-2 border-current rounded-sm" />
+                  </button>
+                  <button 
                     onClick={() => setTacticalTool('text')}
                     className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'text' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     title="Skriv text"
@@ -4058,7 +4194,7 @@ export default function LineupBuilder({
               {/* Row 2: Contextual Settings & Actions */}
               <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent">
                 <AnimatePresence mode="wait">
-                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'text') && (
+                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square' || tacticalTool === 'text') && (
                     <motion.div 
                       key="context-settings"
                       initial={{ opacity: 0, x: -10 }}
@@ -4098,7 +4234,7 @@ export default function LineupBuilder({
                           </div>
                         )}
 
-                        {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle') && (
+                        {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square') && (
                           <div className="flex bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
                             <button 
                               onClick={() => setTacticalLineType('solid')}
@@ -4626,14 +4762,14 @@ export default function LineupBuilder({
                   {/* Horizontal Line Divider */}
                   <div className="h-[1px] bg-zinc-150 dark:bg-zinc-800/80 w-full" />
 
-                  {/* Part 2: Layout */}
+                  {/* Part 2: Spelarutseende */}
                   <div className="flex flex-col gap-3">
-                    <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest ml-1">Layout</span>
+                    <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest ml-1">Spelarutseende</span>
                     
                     <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {/* Theme Style */}
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tema</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnfärg</span>
                         <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                           <button
                             onClick={() => {
@@ -4666,7 +4802,7 @@ export default function LineupBuilder({
 
                       {/* Photo Toggle */}
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Foto</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Spelarfoto</span>
                         <button
                           onClick={() => {
                             setShowPhoto(!showPhoto);
@@ -4685,7 +4821,7 @@ export default function LineupBuilder({
 
                       {/* Number Toggle */}
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Visa Nr</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Tröjnummer</span>
                         <button
                           onClick={() => {
                             setShowNumber(!showNumber);
@@ -4706,7 +4842,7 @@ export default function LineupBuilder({
 
                       {/* Name Toggle */}
                       <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-405 uppercase tracking-widest ml-1">Visa Namn</span>
+                        <span className="text-[10px] font-black text-zinc-405 uppercase tracking-widest ml-1">Spelarnamn</span>
                         <button
                           onClick={() => {
                             setShowName(!showName);
@@ -4756,7 +4892,7 @@ export default function LineupBuilder({
 
                       {/* Background Type */}
                       <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Namnskylt</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Skyltstil</span>
                         <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                           <button onClick={() => {
                             setNameBackgroundType('badge');
@@ -4782,7 +4918,7 @@ export default function LineupBuilder({
                       </div>
 
                       <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Planens utseende</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Planstil</span>
                         <div className="grid grid-cols-2 xs:grid-cols-3 gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                           <button onClick={() => {
                             setPitchType('classic');
@@ -4820,7 +4956,7 @@ export default function LineupBuilder({
                       </div>
 
                       <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Anfallsriktning</span>
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Spelriktning</span>
                         <div className="flex gap-1 p-1 bg-zinc-50 dark:bg-zinc-955 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                           {orientation === 'vertical' ? (
                             <>
@@ -5060,87 +5196,25 @@ export default function LineupBuilder({
       <AnimatePresence>
         {/* Logo Cropping Modal */}
         {showLogoPicker && logoToCrop && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 sm:p-8"
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-[40px] shadow-2xl border border-zinc-100 dark:border-zinc-800 w-full max-w-xl flex flex-col overflow-hidden"
-            >
-              <div className="p-8 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Beskär Klubblogo</h3>
-                  <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Anpassa logotypens utseende</p>
-                </div>
-                <button
-                  onClick={() => setShowLogoPicker(false)}
-                  className="w-12 h-12 flex items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="relative h-[400px] bg-zinc-100 dark:bg-zinc-950">
-                <Cropper
-                  image={logoToCrop}
-                  crop={crop}
-                  zoom={zoom}
-                  minZoom={0.5}
-                  restrictPosition={false}
-                  aspect={1}
-                  onCropChange={setCrop}
-                  onCropComplete={onCropComplete}
-                  onZoomChange={setZoom}
-                  cropShape="rect"
-                  showGrid={true}
-                />
-              </div>
-
-              <div className="p-8 space-y-8 bg-zinc-50 dark:bg-zinc-900/50">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Zoom</span>
-                    <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{Math.round(zoom * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    value={zoom}
-                    min={0.5}
-                    max={3}
-                    step={0.01}
-                    aria-label="Zoom"
-                    onChange={(e) => setZoom(Number(e.target.value))}
-                    className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      setTeamLogoUrl(''); // Reset to default
-                      setShowLogoPicker(false);
-                      setLogoToCrop(null);
-                    }}
-                    className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700"
-                  >
-                    Nollställ till profil
-                  </button>
-                  <button
-                    onClick={generateCroppedLogo}
-                    className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none flex items-center justify-center gap-2"
-                  >
-                    <Check size={18} strokeWidth={3} />
-                    Spara Logga
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
+          <ImageCropper
+            image={logoToCrop}
+            onCropComplete={(croppedBlob) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                if (typeof reader.result === 'string') {
+                  setTeamLogoUrl(reader.result);
+                  setShowLogoPicker(false);
+                  setLogoToCrop(null);
+                  setHasUnsavedChanges(true);
+                }
+              };
+              reader.readAsDataURL(croppedBlob);
+            }}
+            onCancel={() => {
+              setShowLogoPicker(false);
+              setLogoToCrop(null);
+            }}
+          />
         )}
 
         {/** Title Edit Modal */}

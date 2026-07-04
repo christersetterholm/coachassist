@@ -67,9 +67,13 @@ export interface TacticalSavedBoard {
   players: LineupPlayer[];
   footballPos: { x: number, y: number } | null;
   footballScale?: number;
+  elementScale?: number;
   showOpponents: boolean;
   opponentColor?: string;
   pitchType?: string;
+  pitchSize?: 'full' | 'half';
+  orientation?: 'vertical' | 'landscape';
+  attackDirection?: 'up' | 'down' | 'left' | 'right';
 }
 
 export interface Team {
@@ -122,6 +126,7 @@ export interface SessionMoment {
   imageUrl?: string;
   imageUrls?: string[];
   externalLink?: string;
+  tacticalBoards?: TacticalSavedBoard[];
 }
 
 export interface TrainingSettings {
@@ -293,5 +298,6 @@ export interface BankExercise {
   imageUrls?: string[];
   externalLink?: string;
   createdAt: number;
+  tacticalBoards?: TacticalSavedBoard[];
 }
 
