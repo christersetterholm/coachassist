@@ -104,7 +104,31 @@
     },
     "/users/{userId}/config/state": {
       "schema": "UserData",
-      "description": "The synchronized state for a coach."
+      "description": "The synchronized state for a coach (deprecated, kept for migration)."
+    },
+    "/users/{userId}/data/squad": {
+      "schema": "object",
+      "description": "Granular squad data segment."
+    },
+    "/users/{userId}/data/sessions": {
+      "schema": "object",
+      "description": "Granular sessions and deleted sessions data segment."
+    },
+    "/users/{userId}/data/exercises": {
+      "schema": "object",
+      "description": "Granular exercises, exercise bank, and category data segment."
+    },
+    "/users/{userId}/data/lineups": {
+      "schema": "object",
+      "description": "Granular lineups and active lineup ID data segment (real-time synced)."
+    },
+    "/users/{userId}/data/periods": {
+      "schema": "object",
+      "description": "Granular period and current period data segment."
+    },
+    "/users/{userId}/data/settings": {
+      "schema": "object",
+      "description": "Granular setting fields, custom formations, and training options segment."
     },
     "/users/{userId}/lineup_history/{lineupId}": {
       "schema": "LineupHistory",

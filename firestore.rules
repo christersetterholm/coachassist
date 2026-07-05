@@ -62,6 +62,11 @@ service cloud.firestore {
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
     }
 
+    match /users/{userId}/data/{docId} {
+      // Users can only read and write their own data segments
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
     match /users/{userId}/lineup_history/{lineupId} {
       // Users can only read and write their own history
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
