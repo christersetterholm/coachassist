@@ -1831,14 +1831,7 @@ export default function TacticalBoardModal({
                   <button 
                     onClick={() => handleToolSelect('rectangle')}
                     className={`p-2 rounded-xl transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
-                    title="Rita rektangel"
-                  >
-                    <div className="w-5 h-3.5 border-2 border-current rounded-sm" />
-                  </button>
-                  <button 
-                    onClick={() => handleToolSelect('square')}
-                    className={`p-2 rounded-xl transition-all ${tacticalTool === 'square' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
-                    title="Rita kvadrat"
+                    title="Rita fyrkant"
                   >
                     <div className="w-4.5 h-4.5 border-2 border-current rounded-sm" />
                   </button>

@@ -4133,14 +4133,7 @@ export default function LineupBuilder({
                   <button 
                     onClick={() => setTacticalTool('rectangle')}
                     className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
-                    title="Rita rektangel"
-                  >
-                    <div className="w-5.5 h-4 border-2 border-current rounded-sm" />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('square')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'square' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
-                    title="Rita kvadrat"
+                    title="Rita fyrkant"
                   >
                     <div className="w-5 h-5 border-2 border-current rounded-sm" />
                   </button>
