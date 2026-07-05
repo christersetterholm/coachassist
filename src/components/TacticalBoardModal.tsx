@@ -1148,7 +1148,9 @@ export default function TacticalBoardModal({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className={`relative border border-white/10 dark:border-white/15 overflow-hidden transition-all duration-300 shadow-2xl ${
+              className={`relative border border-white/10 dark:border-white/15 overflow-hidden transition-all duration-300 shadow-2xl touch-none select-none ${
+                tacticalTool === 'move' ? 'cursor-default' : 'cursor-crosshair'
+              } ${
                 pitchType === 'solid-white' ? 'bg-white border-zinc-300' :
                 pitchType === 'solid-black' ? 'bg-zinc-950 border-zinc-800' :
                 pitchType === 'blue' || pitchType === 'solid-blue' || pitchType === 'blue-stripes' || pitchType === 'blue-grass' ? 'bg-sky-600' : 'bg-[#67a030]'
