@@ -66,6 +66,7 @@ export interface TacticalSavedBoard {
   opponents: { id: string, x: number, y: number }[];
   players: LineupPlayer[];
   footballPos: { x: number, y: number } | null;
+  footballs?: { id: string, x: number, y: number }[];
   footballScale?: number;
   elementScale?: number;
   showOpponents: boolean;

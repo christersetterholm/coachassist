@@ -107,8 +107,7 @@ export default function TacticalBoardModal({
   });
 
   const [activeBoardId, setActiveBoardId] = useState<string>(localBoards[0]?.id || "");
-  const [activeTab, setActiveTab] = useState<'boards' | 'elements'>('boards');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isToolboxVisible, setIsToolboxVisible] = useState(true);
 
   // Active board data
@@ -120,7 +119,10 @@ export default function TacticalBoardModal({
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(activeBoard?.drawings || []);
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number }[]>(activeBoard?.opponents || []);
   const [boardElements, setBoardElements] = useState<BoardElement[]>(activeBoard?.players as BoardElement[] || []);
-  const [footballPos, setFootballPos] = useState<{ x: number, y: number } | null>(activeBoard?.footballPos || null);
+  const [footballs, setFootballs] = useState<{ id: string, x: number, y: number }[]>(() => {
+    if (activeBoard?.footballs) return activeBoard.footballs;
+    return activeBoard?.footballPos ? [{ id: 'default-ball', x: activeBoard.footballPos.x, y: activeBoard.footballPos.y }] : [];
+  });
   const [footballScale, setFootballScale] = useState<number>(activeBoard?.footballScale || 1.1);
   const [elementScale, setElementScale] = useState<number>(activeBoard?.elementScale || 1.0);
   const [showOpponents, setShowOpponents] = useState<boolean>(activeBoard?.showOpponents !== false);
@@ -131,7 +133,7 @@ export default function TacticalBoardModal({
   const [attackDirection, setAttackDirection] = useState<'up' | 'down' | 'left' | 'right'>(activeBoard?.attackDirection || 'up');
 
   // Drawing Tools State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square'>('move');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square' | 'add-element'>('move');
   const [tacticalColor, setTacticalColor] = useState<string>('#ffffff');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
@@ -154,7 +156,7 @@ export default function TacticalBoardModal({
   const dragControls = useDragControls();
   const [isSubmenuVisible, setIsSubmenuVisible] = useState(true);
 
-  const handleToolSelect = (tool: 'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square') => {
+  const handleToolSelect = (tool: 'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square' | 'add-element') => {
     if (tacticalTool === tool) {
       setIsSubmenuVisible(prev => !prev);
     } else {
@@ -164,9 +166,10 @@ export default function TacticalBoardModal({
   };
 
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isErasing, setIsErasing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number, y: number }[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [draggingBall, setDraggingBall] = useState(false);
+  const [draggingBallId, setDraggingBallId] = useState<string | null>(null);
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [isTransforming, setIsTransforming] = useState<'move' | 'resize' | null>(null);
@@ -192,13 +195,65 @@ export default function TacticalBoardModal({
   const pitchAspectRatio = pitchRatioW / pitchRatioH;
   const markerSuffix = "tactical-board";
 
+  const performErase = (x: number, y: number) => {
+    // Erase drawing
+    setTacticalDrawings(prev => {
+      const filtered = prev.filter(d => {
+        if (d.type === 'text') {
+          return Math.hypot(d.points[0].x - x, d.points[0].y - y) > 7.5;
+        }
+        if (d.type === 'circle') {
+          const rx = Math.hypot(d.points[0].x - d.points[1].x, d.points[0].y - d.points[1].y);
+          const ry = rx * pitchAspectRatio;
+          const dx = x - d.points[0].x;
+          const dy = y - d.points[0].y;
+          const dist = Math.sqrt(Math.pow(dx / rx, 2) + Math.pow(dy / ry, 2));
+          const nearBoundary = Math.abs(dist - 1) <= 0.35;
+          const nearCenter = Math.hypot(dx, dy) < 7.5;
+          return !(nearBoundary || nearCenter);
+        }
+        if (d.type === 'rectangle' || d.type === 'square') {
+          const xMin = Math.min(d.points[0].x, d.points[1].x);
+          const xMax = Math.max(d.points[0].x, d.points[1].x);
+          const yMin = Math.min(d.points[0].y, d.points[1].y);
+          const yMax = Math.max(d.points[0].y, d.points[1].y);
+          const inside = x >= xMin - 4 && x <= xMax + 4 && y >= yMin - 4 && y <= yMax + 4;
+          return !inside;
+        }
+        return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 6);
+      });
+      
+      const remainingIds = new Set(filtered.map(d => d.id));
+      if (selectedDrawingId && !remainingIds.has(selectedDrawingId)) {
+        setSelectedDrawingId(null);
+      }
+      return filtered;
+    });
+
+    // Erase opponent
+    setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 7.5));
+
+    // Erase generic elements/players
+    setBoardElements(prev => {
+      const filtered = prev.filter(el => Math.hypot(el.x - x, el.y - y) > 7.5);
+      const remainingIds = new Set(filtered.map(el => el.id));
+      if (selectedElementId && !remainingIds.has(selectedElementId)) {
+        setSelectedElementId(null);
+      }
+      return filtered;
+    });
+
+    // Erase ball
+    setFootballs(prev => prev.filter(fb => Math.hypot(fb.x - x, fb.y - y) > 7.5));
+  };
+
   // Sync active board values when activeBoardId changes
   useEffect(() => {
     if (!activeBoard) return;
     setTacticalDrawings(activeBoard.drawings || []);
     setOpponents(activeBoard.opponents || []);
     setBoardElements(activeBoard.players as BoardElement[] || []);
-    setFootballPos(activeBoard.footballPos || null);
+    setFootballs(activeBoard.footballs || (activeBoard.footballPos ? [{ id: 'default-ball', x: activeBoard.footballPos.x, y: activeBoard.footballPos.y }] : []));
     setFootballScale(activeBoard.footballScale || 1.1);
     setElementScale(activeBoard.elementScale || 1.0);
     setShowOpponents(activeBoard.showOpponents !== false);
@@ -222,7 +277,8 @@ export default function TacticalBoardModal({
       drawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       opponents,
       players: boardElements,
-      footballPos,
+      footballPos: footballs[0] ? { x: footballs[0].x, y: footballs[0].y } : null,
+      footballs,
       footballScale,
       elementScale,
       showOpponents,
@@ -232,7 +288,7 @@ export default function TacticalBoardModal({
       orientation,
       attackDirection
     } as any : b));
-  }, [activeBoardId, tacticalDrawings, opponents, boardElements, footballPos, footballScale, elementScale, showOpponents, opponentColor, pitchType, pitchSize, orientation, attackDirection]);
+  }, [activeBoardId, tacticalDrawings, opponents, boardElements, footballs, footballScale, elementScale, showOpponents, opponentColor, pitchType, pitchSize, orientation, attackDirection]);
 
   // Push to history for Undo/Redo
   const pushHistory = useCallback(() => {
@@ -240,11 +296,11 @@ export default function TacticalBoardModal({
       drawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       opponents: [...opponents],
       players: JSON.parse(JSON.stringify(boardElements)),
-      footballPos: footballPos ? { ...footballPos } : null,
+      footballs: JSON.parse(JSON.stringify(footballs)),
     };
     setHistory(prev => [...prev, currentStateSnapshot]);
     setFuture([]); // Clear redo
-  }, [tacticalDrawings, opponents, boardElements, footballPos]);
+  }, [tacticalDrawings, opponents, boardElements, footballs]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -285,7 +341,7 @@ export default function TacticalBoardModal({
       drawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       opponents: [...opponents],
       players: JSON.parse(JSON.stringify(boardElements)),
-      footballPos: footballPos ? { ...footballPos } : null,
+      footballs: JSON.parse(JSON.stringify(footballs)),
     };
     setFuture(prev => [currentSnapshot, ...prev]);
 
@@ -293,7 +349,7 @@ export default function TacticalBoardModal({
     setTacticalDrawings(previous.drawings);
     setOpponents(previous.opponents);
     setBoardElements(previous.players);
-    setFootballPos(previous.footballPos);
+    setFootballs(previous.footballs || []);
   };
 
   // Perform Redo
@@ -307,7 +363,7 @@ export default function TacticalBoardModal({
       drawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       opponents: [...opponents],
       players: JSON.parse(JSON.stringify(boardElements)),
-      footballPos: footballPos ? { ...footballPos } : null,
+      footballs: JSON.parse(JSON.stringify(footballs)),
     };
     setHistory(prev => [...prev, currentSnapshot]);
 
@@ -315,13 +371,13 @@ export default function TacticalBoardModal({
     setTacticalDrawings(next.drawings);
     setOpponents(next.opponents);
     setBoardElements(next.players);
-    setFootballPos(next.footballPos);
+    setFootballs(next.footballs || []);
   };
 
   // Auto-sync active state changes back to board list
   useEffect(() => {
     updateActiveBoardInList();
-  }, [tacticalDrawings, opponents, boardElements, footballPos, footballScale, elementScale, showOpponents, opponentColor, pitchType, orientation, attackDirection]);
+  }, [tacticalDrawings, opponents, boardElements, footballs, footballScale, elementScale, showOpponents, opponentColor, pitchType, orientation, attackDirection]);
 
   // Coordinate transformations
   const transformCoords = (clientX: number, clientY: number) => {
@@ -375,8 +431,9 @@ export default function TacticalBoardModal({
     // Ball placement
     if (tacticalTool === 'ball') {
       pushHistory();
-      setFootballPos({ x, y });
-      setDraggingBall(true);
+      const newBall = { id: Math.random().toString(36).substr(2, 9), x, y };
+      setFootballs(prev => [...prev, newBall]);
+      setDraggingBallId(newBall.id);
       return;
     }
 
@@ -385,6 +442,11 @@ export default function TacticalBoardModal({
       pushHistory();
       const newOpponent = { id: Math.random().toString(36).substr(2, 9), x, y };
       setOpponents(prev => [...prev, newOpponent]);
+      return;
+    }
+
+    // Add Element tool (nothing to do on field click, actions are triggered from Row 2 buttons)
+    if (tacticalTool === 'add-element') {
       return;
     }
 
@@ -441,41 +503,8 @@ export default function TacticalBoardModal({
     // Eraser Tool
     if (tacticalTool === 'eraser') {
       pushHistory();
-      // Erase drawing
-      setTacticalDrawings(prev => prev.filter(d => {
-        if (d.type === 'text') {
-          return Math.hypot(d.points[0].x - x, d.points[0].y - y) > 6;
-        }
-        if (d.type === 'circle') {
-          const rx = Math.hypot(d.points[0].x - d.points[1].x, d.points[0].y - d.points[1].y);
-          const ry = rx * pitchAspectRatio;
-          const dx = x - d.points[0].x;
-          const dy = y - d.points[0].y;
-          const dist = Math.sqrt(Math.pow(dx / rx, 2) + Math.pow(dy / ry, 2));
-          return Math.abs(dist - 1) > 0.25;
-        }
-        if (d.type === 'rectangle' || d.type === 'square') {
-          const xMin = Math.min(d.points[0].x, d.points[1].x);
-          const xMax = Math.max(d.points[0].x, d.points[1].x);
-          const yMin = Math.min(d.points[0].y, d.points[1].y);
-          const yMax = Math.max(d.points[0].y, d.points[1].y);
-          // Check if click is inside or very close to the box
-          const inside = x >= xMin - 2 && x <= xMax + 2 && y >= yMin - 2 && y <= yMax + 2;
-          return !inside;
-        }
-        return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 4);
-      }));
-
-      // Erase opponent
-      setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 5));
-
-      // Erase generic elements/players
-      setBoardElements(prev => prev.filter(el => Math.hypot(el.x - x, el.y - y) > 6));
-
-      // Erase ball
-      if (footballPos && Math.hypot(footballPos.x - x, footballPos.y - y) < 6) {
-        setFootballPos(null);
-      }
+      setIsErasing(true);
+      performErase(x, y);
       return;
     }
 
@@ -515,6 +544,12 @@ export default function TacticalBoardModal({
     if (!fieldRef.current) return;
     const { x, y } = transformCoords(e.clientX, e.clientY);
 
+    // Eraser Tool Drag-erase
+    if (tacticalTool === 'eraser' && isErasing) {
+      performErase(x, y);
+      return;
+    }
+
     // Rotating element
     if (isRotatingId) {
       const el = boardElements.find(item => item.id === isRotatingId);
@@ -532,8 +567,8 @@ export default function TacticalBoardModal({
     }
 
     // Draggable ball
-    if (draggingBall) {
-      setFootballPos({ x, y });
+    if (draggingBallId) {
+      setFootballs(prev => prev.map(fb => fb.id === draggingBallId ? { ...fb, x, y } : fb));
       return;
     }
 
@@ -617,17 +652,18 @@ export default function TacticalBoardModal({
     }
     setIsTransforming(null);
     setTransformStart(null);
-    setDraggingBall(false);
+    setDraggingBallId(null);
     setDraggingOpponentId(null);
     setDraggingId(null);
     setIsRotatingId(null);
+    setIsErasing(false);
   };
 
   // Quick action: Clear whiteboard
   const clearBoard = () => {
     pushHistory();
     setTacticalDrawings([]);
-    setFootballPos(null);
+    setFootballs([]);
     setOpponents([]);
     setBoardElements([]);
   };
@@ -854,282 +890,136 @@ export default function TacticalBoardModal({
         {/* Left Control Sidebar */}
         <div className={`${isSidebarOpen ? 'w-80 border-r border-zinc-800' : 'w-0 pointer-events-none border-r-0'} bg-zinc-900/40 backdrop-blur-md flex flex-col shrink-0 transition-all duration-300 overflow-hidden z-[120] absolute inset-y-0 left-0 md:relative h-full`}>
           
-          {/* Sidebar Tabs */}
-          <div className="flex items-center justify-between border-b border-zinc-800 p-2 gap-1 shrink-0 bg-zinc-900/80">
-            <div className="grid grid-cols-2 gap-1 flex-1">
-              <button
-                onClick={() => setActiveTab('boards')}
-                className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
-                  activeTab === 'boards' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'
-                }`}
-              >
-                Rittavlor ({localBoards.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('elements')}
-                className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
-                  activeTab === 'elements' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'
-                }`}
-              >
-                Placera element
-              </button>
-            </div>
+          {/* Sidebar Header */}
+          <div className="flex items-center justify-between border-b border-zinc-800 p-4 shrink-0 bg-zinc-900/80">
+            <span className="text-xs font-black uppercase tracking-wider text-white">Rittavlor ({localBoards.length})</span>
             
             {/* Quick close sidebar button inside sidebar itself */}
             <button
               onClick={() => setIsSidebarOpen(false)}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg md:hidden"
+              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg md:hidden"
               title="Dölj panel"
             >
               <X size={16} />
             </button>
           </div>
 
-          {/* Tab 1: List of Boards */}
-          {activeTab === 'boards' && (
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <button
-                onClick={addNewBoard}
-                className="w-full py-3 px-4 border border-dashed border-indigo-500/30 hover:border-indigo-500/60 bg-indigo-950/10 hover:bg-indigo-950/25 rounded-2xl flex items-center justify-center gap-2 text-indigo-400 text-xs font-black uppercase tracking-widest transition-all"
-              >
-                <Plus size={14} className="stroke-[3px]" />
-                Skapa rittavla
-              </button>
+          {/* List of Boards */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <button
+              onClick={addNewBoard}
+              className="w-full py-3 px-4 border border-dashed border-indigo-500/30 hover:border-indigo-500/60 bg-indigo-950/10 hover:bg-indigo-950/25 rounded-2xl flex items-center justify-center gap-2 text-indigo-400 text-xs font-black uppercase tracking-widest transition-all"
+            >
+              <Plus size={14} className="stroke-[3px]" />
+              Skapa rittavla
+            </button>
 
-              <div className="space-y-2">
-                {localBoards.map((board) => {
-                  const isActive = board.id === activeBoardId;
-                  const isRenaming = renamingBoardId === board.id;
+            <div className="space-y-2">
+              {localBoards.map((board) => {
+                const isActive = board.id === activeBoardId;
+                const isRenaming = renamingBoardId === board.id;
 
-                  return (
-                    <div
-                      key={board.id}
-                      onClick={() => !isRenaming && setActiveBoardId(board.id)}
-                      className={`group p-3 rounded-2xl border transition-all cursor-pointer flex flex-col relative ${
-                        isActive 
-                          ? 'bg-zinc-800/90 border-indigo-500/40 ring-1 ring-indigo-500/20' 
-                          : 'bg-zinc-900/30 hover:bg-zinc-800/40 border-zinc-800/45 hover:border-zinc-800'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full min-h-[36px]">
-                        {isRenaming ? (
-                          <div className="flex items-center gap-1.5 flex-1 mr-2" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="text"
-                              value={renameValue}
-                              onChange={(e) => setRenameValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveRename(board.id);
-                                if (e.key === 'Escape') setRenamingBoardId(null);
-                              }}
-                              className="bg-zinc-950 border border-zinc-750 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none flex-1 min-w-0"
-                              autoFocus
-                            />
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSaveRename(board.id);
-                              }}
-                              className="p-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-white flex items-center justify-center shrink-0 transition-colors"
-                              title="Spara"
-                            >
-                              <Check size={13} className="stroke-[3px]" />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRenamingBoardId(null);
-                              }}
-                              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white flex items-center justify-center shrink-0 transition-colors"
-                              title="Avbryt"
-                            >
-                              <X size={13} className="stroke-[3px]" />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs font-black text-zinc-200 truncate pr-2 uppercase tracking-wide flex-1">
-                            {board.name}
-                          </span>
-                        )}
+                return (
+                  <div
+                    key={board.id}
+                    onClick={() => !isRenaming && setActiveBoardId(board.id)}
+                    className={`group p-3 rounded-2xl border transition-all cursor-pointer flex flex-col relative ${
+                      isActive 
+                        ? 'bg-zinc-800/90 border-indigo-500/40 ring-1 ring-indigo-500/20' 
+                        : 'bg-zinc-900/30 hover:bg-zinc-800/40 border-zinc-800/45 hover:border-zinc-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full min-h-[36px]">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1.5 flex-1 mr-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename(board.id);
+                              if (e.key === 'Escape') setRenamingBoardId(null);
+                            }}
+                            className="bg-zinc-950 border border-zinc-750 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none flex-1 min-w-0"
+                            autoFocus
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveRename(board.id);
+                            }}
+                            className="p-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-white flex items-center justify-center shrink-0 transition-colors"
+                            title="Spara"
+                          >
+                            <Check size={13} className="stroke-[3px]" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenamingBoardId(null);
+                            }}
+                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white flex items-center justify-center shrink-0 transition-colors"
+                            title="Avbryt"
+                          >
+                            <X size={13} className="stroke-[3px]" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs font-black text-zinc-200 truncate pr-2 uppercase tracking-wide flex-1">
+                          {board.name}
+                        </span>
+                      )}
 
-                        {/* Actions menu / indicators */}
-                        {!isRenaming && (
-                          <div className={`flex items-center gap-0.5 transition-all shrink-0 ${
-                            isActive 
-                              ? 'opacity-100' 
-                              : 'opacity-80 md:opacity-0 md:group-hover:opacity-100'
-                          }`}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStartRename(board.id, board.name);
-                              }}
-                              className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
-                              title="Byt namn"
-                            >
-                              <Edit2 size={13} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                duplicateBoard(board);
-                              }}
-                              className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
-                              title="Duplicera"
-                            >
-                              <Copy size={13} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteBoard(board.id);
-                              }}
-                              className="p-1.5 hover:bg-red-950/40 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
-                              title="Radera"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Small metadata details on the board card */}
-                      <span className="text-[9px] text-zinc-500 font-bold uppercase mt-1">
-                        {board.drawings?.length || 0} figurer • {board.players?.length || 0} element
-                      </span>
+                      {/* Actions menu / indicators */}
+                      {!isRenaming && (
+                        <div className={`flex items-center gap-0.5 transition-all shrink-0 ${
+                          isActive 
+                            ? 'opacity-100' 
+                            : 'opacity-80 md:opacity-0 md:group-hover:opacity-100'
+                        }`}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartRename(board.id, board.name);
+                            }}
+                            className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                            title="Byt namn"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              duplicateBoard(board);
+                            }}
+                            className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                            title="Duplicera"
+                          >
+                            <Copy size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteBoard(board.id);
+                            }}
+                            className="p-1.5 hover:bg-red-950/40 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
+                            title="Radera"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
-          {/* Tab 2: Placing Elements */}
-          {activeTab === 'elements' && (
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
-              
-              {/* Generic/Standard Elements */}
-              <div className="space-y-2.5">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Standardelement</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => addElementToPitch('generic-home')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1.5 text-zinc-300 transition-all text-xs font-bold uppercase"
-                  >
-                    <div className="w-8 h-8 rounded-full bg-blue-600 border border-white flex items-center justify-center font-black text-white text-xs">H</div>
-                    <span>Blå spelare</span>
-                  </button>
-                  <button
-                    onClick={() => addElementToPitch('generic-away')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1.5 text-zinc-300 transition-all text-xs font-bold uppercase"
-                  >
-                    <div className="w-8 h-8 rounded-full bg-amber-500 border border-white flex items-center justify-center font-black text-white text-xs">B</div>
-                    <span>Gul spelare</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Training Cones and obstacles */}
-              <div className="space-y-2.5">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Koner & Utrustning</span>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => addElementToPitch('cone-orange')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1 transition-all text-[10px] font-black text-zinc-400 uppercase"
-                  >
-                    <ConeIcon color="#f97316" size={24} />
-                    <span>Orange</span>
-                  </button>
-                  <button
-                    onClick={() => addElementToPitch('cone-yellow')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1 transition-all text-[10px] font-black text-zinc-400 uppercase"
-                  >
-                    <ConeIcon color="#eab308" size={24} />
-                    <span>Gul</span>
-                  </button>
-                  <button
-                    onClick={() => addElementToPitch('cone-blue')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1 transition-all text-[10px] font-black text-zinc-400 uppercase"
-                  >
-                    <ConeIcon color="#3b82f6" size={24} />
-                    <span>Blå</span>
-                  </button>
-                  <button
-                    onClick={() => addElementToPitch('goal')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1 transition-all text-[10px] font-black text-zinc-400 uppercase col-span-1"
-                  >
-                    <GoalIcon size={24} />
-                    <span>Mål</span>
-                  </button>
-                  <button
-                    onClick={() => addElementToPitch('ladder')}
-                    className="p-2.5 bg-zinc-900 hover:bg-zinc-800/80 rounded-xl border border-zinc-800/80 flex flex-col items-center justify-center gap-1 transition-all text-[10px] font-black text-zinc-400 uppercase col-span-2"
-                  >
-                    <LadderIcon size={24} />
-                    <span>Stege / Hinder</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Squad List Section (Trupplista) */}
-              {squad && squad.length > 0 && (
-                <div className="space-y-2.5">
-                  <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Truppspelare</span>
-                  <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
-                    {squad.map((sp) => {
-                      const boardEl = boardElements.find(el => el.playerId === sp.id);
-                      const isOnBoard = !!boardEl;
-
-                      return (
-                        <button
-                          key={sp.id}
-                          onClick={() => {
-                            if (isOnBoard) {
-                              pushHistory();
-                              setBoardElements(prev => prev.filter(el => el.playerId !== sp.id));
-                              if (boardEl && selectedElementId === boardEl.id) {
-                                setSelectedElementId(null);
-                              }
-                            } else {
-                              addElementToPitch('squad', sp);
-                            }
-                          }}
-                          className={`w-full p-2 rounded-xl flex items-center justify-between text-left text-xs font-bold transition-all group ${
-                            isOnBoard 
-                              ? 'bg-indigo-950/40 text-indigo-300 border border-indigo-900/50 hover:bg-red-950/45 hover:text-red-400 hover:border-red-900/50' 
-                              : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 hover:border-zinc-700'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            {sp.photoUrl ? (
-                              <img src={sp.photoUrl} alt={sp.name} className="w-6 h-6 rounded-full object-cover" />
-                            ) : (
-                              <div className="w-6 h-6 rounded-full bg-indigo-900/60 flex items-center justify-center text-[10px] text-white">
-                                {sp.name.charAt(0)}
-                              </div>
-                            )}
-                            <span className="truncate max-w-[140px]">{sp.name}</span>
-                          </div>
-                          {isOnBoard ? (
-                            <div className="text-[9px] font-bold uppercase shrink-0">
-                              <span className="group-hover:hidden text-indigo-400">Inlagd</span>
-                              <span className="hidden group-hover:inline text-red-400">
-                                Ta bort
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-[9px] text-zinc-500 font-bold uppercase shrink-0">
-                              + Lägg till
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
+                    {/* Small metadata details on the board card */}
+                    <span className="text-[9px] text-zinc-500 font-bold uppercase mt-1">
+                      {board.drawings?.length || 0} figurer • {board.players?.length || 0} element
+                    </span>
                   </div>
-                </div>
-              )}
+                );
+              })}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Main Canvas Area */}
@@ -1484,20 +1374,22 @@ export default function TacticalBoardModal({
                   ))}
                 </svg>
 
-                {/* Draggable Ball Item */}
-                {footballPos && (
+                {/* Draggable Ball Items */}
+                {footballs.map((fb) => (
                   <div
+                    key={fb.id}
                     className="absolute z-30 pointer-events-auto select-none cursor-grab active:cursor-grabbing after:absolute after:-inset-3 after:rounded-full"
                     style={{
-                      left: `${footballPos.x}%`,
-                      top: `${footballPos.y}%`,
+                      left: `${fb.x}%`,
+                      top: `${fb.y}%`,
                       touchAction: 'none',
                       transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(${elementScale})`,
                     }}
                     onPointerDown={(e) => {
+                      if (tacticalTool === 'eraser') return;
                       e.stopPropagation();
                       pushHistory();
-                      setDraggingBall(true);
+                      setDraggingBallId(fb.id);
                     }}
                   >
                     <div 
@@ -1510,7 +1402,7 @@ export default function TacticalBoardModal({
                       <SoccerBallIcon className="w-full h-full text-zinc-950" />
                     </div>
                   </div>
-                )}
+                ))}
 
                 {/* Draggable Red Opponents */}
                 {showOpponents && opponents.map((opp) => (
@@ -1524,6 +1416,7 @@ export default function TacticalBoardModal({
                       transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(${elementScale})`,
                     }}
                     onPointerDown={(e) => {
+                      if (tacticalTool === 'eraser') return;
                       e.stopPropagation();
                       pushHistory();
                       setDraggingOpponentId(opp.id);
@@ -1564,6 +1457,7 @@ export default function TacticalBoardModal({
                         transform: finalTransform,
                       }}
                       onPointerDown={(e) => {
+                        if (tacticalTool === 'eraser') return;
                         e.stopPropagation();
                         pushHistory();
                         setDraggingId(el.id);
@@ -1859,6 +1753,13 @@ export default function TacticalBoardModal({
                     <Shirt size={18} strokeWidth={2.5} />
                   </button>
                   <button 
+                    onClick={() => handleToolSelect('add-element')}
+                    className={`p-2 rounded-xl transition-all ${tacticalTool === 'add-element' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                    title="Placera spelare & material"
+                  >
+                    <Plus size={18} strokeWidth={2.5} />
+                  </button>
+                  <button 
                     onClick={() => handleToolSelect('eraser')}
                     className={`p-2 rounded-xl transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
                     title="Suddgummi"
@@ -1879,7 +1780,7 @@ export default function TacticalBoardModal({
               </div>
 
               {/* Row 2: Contextual Settings & Actions */}
-              {isSubmenuVisible && (
+              {isSubmenuVisible && tacticalTool !== 'eraser' && (
                 <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[48px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent border-t border-zinc-800/10 mt-1 pl-1">
                   <AnimatePresence mode="wait">
                   {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square' || tacticalTool === 'text') && (
@@ -1989,6 +1890,125 @@ export default function TacticalBoardModal({
                       >
                         {showOpponents ? 'Dölj Motstånd' : 'Visa Motstånd'}
                       </button>
+                    </motion.div>
+                  )}
+
+                  {tacticalTool === 'add-element' && (
+                    <motion.div 
+                      key="add-element-settings"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="flex items-center gap-4 shrink-0 w-full"
+                    >
+                      {/* Standard Objects: Blue & Yellow Players */}
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-850 shrink-0">
+                        <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest leading-none block mr-1">Spelare</span>
+                        <button
+                          onClick={() => addElementToPitch('generic-home')}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 text-[10px] font-bold uppercase transition-all"
+                          title="Lägg till blå spelare"
+                        >
+                          <div className="w-4 h-4 rounded-full bg-blue-600 border border-white flex items-center justify-center font-black text-white text-[9px]">H</div>
+                          <span className="text-zinc-300">Blå</span>
+                        </button>
+                        <button
+                          onClick={() => addElementToPitch('generic-away')}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 text-[10px] font-bold uppercase transition-all"
+                          title="Lägg till gul spelare"
+                        >
+                          <div className="w-4 h-4 rounded-full bg-amber-500 border border-white flex items-center justify-center font-black text-white text-[9px]">B</div>
+                          <span className="text-zinc-300">Gul</span>
+                        </button>
+                      </div>
+
+                      {/* Equipment: Cones, Goals, Ladders */}
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-850 shrink-0">
+                        <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest leading-none block mr-1">Material</span>
+                        <button
+                          onClick={() => addElementToPitch('cone-orange')}
+                          className="flex items-center gap-1 p-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 transition-all"
+                          title="Lägg till orange kon"
+                        >
+                          <ConeIcon color="#f97316" size={18} />
+                        </button>
+                        <button
+                          onClick={() => addElementToPitch('cone-yellow')}
+                          className="flex items-center gap-1 p-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 transition-all"
+                          title="Lägg till gul kon"
+                        >
+                          <ConeIcon color="#eab308" size={18} />
+                        </button>
+                        <button
+                          onClick={() => addElementToPitch('cone-blue')}
+                          className="flex items-center gap-1 p-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 transition-all"
+                          title="Lägg till blå kon"
+                        >
+                          <ConeIcon color="#3b82f6" size={18} />
+                        </button>
+                        <button
+                          onClick={() => addElementToPitch('goal')}
+                          className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 transition-all text-[10px] font-bold uppercase"
+                          title="Lägg till mål"
+                        >
+                          <GoalIcon size={16} />
+                          <span className="text-zinc-300">Mål</span>
+                        </button>
+                        <button
+                          onClick={() => addElementToPitch('ladder')}
+                          className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800/80 transition-all text-[10px] font-bold uppercase"
+                          title="Lägg till stege"
+                        >
+                          <LadderIcon size={16} />
+                          <span className="text-zinc-300">Stege</span>
+                        </button>
+                      </div>
+
+                      {/* Squad Players (scrollable list) */}
+                      {squad && squad.length > 0 && (
+                        <div className="flex items-center gap-2 overflow-visible">
+                          <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest leading-none block shrink-0">Trupp</span>
+                          <div className="flex items-center gap-1.5 max-w-[280px] overflow-x-auto py-0.5 no-scrollbar scrollbar-none">
+                            {squad.map((sp) => {
+                              const boardEl = boardElements.find(el => el.playerId === sp.id);
+                              const isOnBoard = !!boardEl;
+
+                              return (
+                                <button
+                                  key={sp.id}
+                                  onClick={() => {
+                                    if (isOnBoard) {
+                                      pushHistory();
+                                      setBoardElements(prev => prev.filter(el => el.playerId !== sp.id));
+                                      if (boardEl && selectedElementId === boardEl.id) {
+                                        setSelectedElementId(null);
+                                      }
+                                    } else {
+                                      addElementToPitch('squad', sp);
+                                    }
+                                  }}
+                                  className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[9px] font-bold transition-all shrink-0 border ${
+                                    isOnBoard 
+                                      ? 'bg-indigo-950/45 text-indigo-300 border-indigo-500/30' 
+                                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-800/80'
+                                  }`}
+                                  title={isOnBoard ? `Ta bort ${sp.name}` : `Placera ${sp.name}`}
+                                >
+                                  {sp.photoUrl ? (
+                                    <img src={sp.photoUrl} alt={sp.name} className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 rounded-full bg-indigo-900/60 flex items-center justify-center text-[7px] text-white shrink-0">
+                                      {sp.name.charAt(0)}
+                                    </div>
+                                  )}
+                                  <span className="truncate max-w-[50px]">{sp.name.split(' ')[0]}</span>
+                                  {isOnBoard && <span className="text-[7px] font-black text-indigo-400">✓</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
